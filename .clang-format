@@ -1,0 +1,8 @@
+BasedOnStyle: LLVM
+IncludeCategories:
+- Regex: "FSubFuscatorPass.hpp"
+  Priority: 1
+- Regex: "llvm/"
+  Priority: 2
+- Regex: ".*"
+  Priority: 3
