@@ -10,6 +10,7 @@ jobs:
       CMAKE_BUILD_TYPE: Release
       CMAKE_CXX_COMPILER: g++-11
       CMAKE_CXX_FLAGS: ""
+      CMAKE_PROGRAM_PATH: ./alive2/build
 
     steps:
     - name: Checkout code
