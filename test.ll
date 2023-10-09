@@ -156,8 +156,37 @@ define i2 @add_reuse(i2 %a, i2 %b, i2 %c) {
   ret i2 %z
 }
 
+define i4 @bitreverse(i4 %a) {
+  %c = call i4 @llvm.bitreverse.i4(i4 %a)
+  ret i4 %c
+}
+
+define i4 @abs_poison(i4 %a) {
+  %c = call i4 @llvm.abs.i4(i4 %a, i1 true)
+  ret i4 %c
+}
+
+define i4 @abs_nopoison(i4 %a) {
+  %c = call i4 @llvm.abs.i4(i4 %a, i1 false)
+  ret i4 %c
+}
+
+define i4 @fshl(i4 %a, i4 %b, i4 %c) {
+  %d = call i4 @llvm.fshl.i4(i4 %a, i4 %b, i4 %c)
+  ret i4 %d
+}
+
+define i4 @fshr(i4 %a, i4 %b, i4 %c) {
+  %d = call i4 @llvm.fshr.i4(i4 %a, i4 %b, i4 %c)
+  ret i4 %d
+}
+
 declare {i4, i1} @llvm.uadd.with.overflow.i4(i4 %a, i4 %b)
 declare {i4, i1} @llvm.usub.with.overflow.i4(i4 %a, i4 %b)
 declare {i4, i1} @llvm.sadd.with.overflow.i4(i4 %a, i4 %b)
 declare {i4, i1} @llvm.ssub.with.overflow.i4(i4 %a, i4 %b)
 declare i4 @llvm.ctpop.i4(i4 %a)
+declare i4 @llvm.bitreverse.i4(i4 %a)
+declare i4 @llvm.abs.i4(i4 %a, i1 %is_int_min_poison)
+declare i4 @llvm.fshl.i4(i4 %a, i4 %b, i4 %c)
+declare i4 @llvm.fshr.i4(i4 %a, i4 %b, i4 %c)

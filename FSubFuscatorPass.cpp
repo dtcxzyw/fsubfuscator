@@ -30,6 +30,7 @@
 #include <llvm/IR/Value.h>
 #include <llvm/Support/ErrorHandling.h>
 #include <llvm/Transforms/InstCombine/InstCombine.h>
+#include <llvm/Transforms/Scalar/EarlyCSE.h>
 #include <llvm/Transforms/Utils/BasicBlockUtils.h>
 #include <llvm/Transforms/Utils/Local.h>
 #include <algorithm>
@@ -305,9 +306,8 @@ public:
   Value *visitSRem(BinaryOperator &I) { return nullptr; }
   Value *visitURem(BinaryOperator &I) { return nullptr; }
   template <typename ShiftOnce>
-  Value *visitShift(BinaryOperator &I, ShiftOnce Func) {
-    auto *Src = convertToBit(I.getOperand(0));
-    auto *ShAmt = Builder.CreateFreeze(I.getOperand(1));
+  Value *visitShift(Type *DestTy, Value *Src, Value *ShAmtVal, ShiftOnce Func) {
+    auto *ShAmt = Builder.CreateFreeze(ShAmtVal);
 
     auto *Block = Builder.GetInsertBlock();
     auto InsertPt = std::next(Builder.GetInsertPoint());
@@ -319,7 +319,7 @@ public:
     Block->getTerminator()->setSuccessor(0, Header);
     // Header
     Builder.SetInsertPoint(Header);
-    auto *IndVar = Builder.CreatePHI(I.getType(), 2);
+    auto *IndVar = Builder.CreatePHI(ShAmtVal->getType(), 2);
     auto *Res = Builder.CreatePHI(Src->getType(), 2);
     auto *Cond = Builder.CreateICmpNE(IndVar, ShAmt);
     Builder.CreateCondBr(Cond, Body, Post);
@@ -338,16 +338,27 @@ public:
 
     // Post
     Builder.SetInsertPoint(Post, Post->getFirstInsertionPt());
-    return convertFromBit(Res, I.getType());
+    Value *FinalRes = Res;
+    // Trunc result for funnel shifts
+    if (DestTy->getScalarSizeInBits() !=
+        cast<VectorType>(Res->getType())->getElementCount().getFixedValue()) {
+      SmallVector<int, 64> Mask(DestTy->getScalarSizeInBits());
+      std::iota(Mask.begin(), Mask.end(), 0);
+      FinalRes = Builder.CreateShuffleVector(FinalRes, Mask);
+    }
+    return convertFromBit(FinalRes, DestTy);
   }
   Value *visitShl(BinaryOperator &I) {
-    return visitShift(I, [&](Value *V) { return shl1(V); });
+    return visitShift(I.getType(), convertToBit(I.getOperand(0)),
+                      I.getOperand(1), [&](Value *V) { return shl1(V); });
   }
   Value *visitAShr(BinaryOperator &I) {
-    return visitShift(I, [&](Value *V) { return ashr1(V); });
+    return visitShift(I.getType(), convertToBit(I.getOperand(0)),
+                      I.getOperand(1), [&](Value *V) { return ashr1(V); });
   }
   Value *visitLShr(BinaryOperator &I) {
-    return visitShift(I, [&](Value *V) { return lshr1(V); });
+    return visitShift(I.getType(), convertToBit(I.getOperand(0)),
+                      I.getOperand(1), [&](Value *V) { return lshr1(V); });
   }
   Value *visitAnd(BinaryOperator &I) {
     auto *Op0 = convertToBit(I.getOperand(0));
@@ -494,6 +505,50 @@ public:
       // FIXME: use BitRep
       return Builder.CreateAddReduce(ZExt);
     }
+    case Intrinsic::fshl:
+    case Intrinsic::fshr: {
+      auto *Op0 = I.getOperand(0);
+      auto *Op1 = I.getOperand(1);
+      Op0 = Builder.CreateFreeze(Op0);
+      Op1 = Builder.CreateFreeze(Op1);
+
+      auto *BitsA = convertToBit(Op0);
+      auto *BitsB = convertToBit(Op1);
+      if (I.getIntrinsicID() == Intrinsic::fshr)
+        std::swap(BitsA, BitsB);
+      auto BitWidth = I.getOperand(0)->getType()->getScalarSizeInBits();
+      SmallVector<int, 128> Mask(BitWidth * 2);
+      std::iota(Mask.begin(), Mask.end(), 0);
+      auto *Combined = Builder.CreateShuffleVector(BitsA, BitsB, Mask);
+      return visitShift(I.getType(), Combined, I.getOperand(2), [&](Value *V) {
+        if (I.getIntrinsicID() == Intrinsic::fshl)
+          return shl1(V);
+        return lshr1(V);
+      });
+    }
+    case Intrinsic::abs: {
+      auto *Op0 = I.getOperand(0);
+      if (cast<ConstantInt>(I.getOperand(1))->isZero())
+        Op0 = Builder.CreateFreeze(Op0);
+      auto BitWidth = Op0->getType()->getScalarSizeInBits();
+      auto *Bits = convertToBit(Op0);
+      auto *Sign = Builder.CreateExtractElement(Bits, BitWidth - 1);
+      auto *Mask = Builder.CreateSelect(
+          BitRep->convertFromBit(Sign),
+          getConstantWithType(Bits->getType(), BitRep->getBit1()),
+          getConstantWithType(Bits->getType(), BitRep->getBit0()));
+      // abs(x) = (x + sign) ^ sign
+      auto *Sum = addWithOverflowBits(Bits, Mask, /*Sub*/ false,
+                                      /*Unsigned*/ true, BitWidth)
+                      .first;
+      auto *Res = BitRep->bitXor(Sum, Mask);
+      return convertFromBit(Res, I.getType());
+    }
+    case Intrinsic::bitreverse: {
+      auto *Bits = convertToBit(I.getOperand(0));
+      auto *Res = Builder.CreateVectorReverse(Bits);
+      return convertFromBit(Res, I.getType());
+    }
     default:
       return nullptr;
     }
@@ -548,6 +603,7 @@ void addFSubFuscatorPasses(FunctionPassManager &PM, OptimizationLevel Level) {
   PM.addPass(FSubFuscator());
   if (Level != OptimizationLevel::O0) {
     // post clean up
+    PM.addPass(EarlyCSEPass());
     PM.addPass(InstCombinePass());
   }
 }
