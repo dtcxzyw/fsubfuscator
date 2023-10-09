@@ -18,12 +18,15 @@
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/SmallVector.h>
+#include <llvm/Analysis/DomTreeUpdater.h>
 #include <llvm/IR/Constant.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/Dominators.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/InstVisitor.h>
 #include <llvm/IR/InstrTypes.h>
+#include <llvm/IR/Instruction.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Intrinsics.h>
 #include <llvm/IR/PassManager.h>
@@ -37,6 +40,8 @@
 #include <cassert>
 #include <iterator>
 #include <numeric>
+#include <unordered_map>
+#include <unordered_set>
 
 cl::OptionCategory FsubFuscatorCategory("fsub fuscator options");
 
@@ -172,11 +177,19 @@ class BitFuscatorImpl final : public InstVisitor<BitFuscatorImpl, Value *> {
   Function &F;
   IRBuilder<> Builder;
   std::unique_ptr<BitRepBase> BitRep;
-  llvm::DenseMap<Value *, Value *> CachedCastToBit, CachedCastFromBit;
+  std::unordered_map<Value *, std::vector<Value *>> CachedCastToBit,
+      CachedCastFromBit;
+  DominatorTree &DT;
+  DomTreeUpdater DTU;
 
   Value *convertToBit(Value *V) {
-    if (auto It = CachedCastToBit.find(V); It != CachedCastToBit.end())
-      return It->second;
+    if (auto It = CachedCastToBit.find(V); It != CachedCastToBit.end()) {
+      auto *Block = Builder.GetInsertBlock();
+      for (auto *Res : It->second)
+        if ((!isa<Instruction>(Res) ||
+             DT.dominates(cast<Instruction>(Res), Block)))
+          return Res;
+    }
     assert(!V->getType()->isVectorTy());
     auto *VT = VectorType::get(Builder.getInt1Ty(),
                                V->getType()->getScalarSizeInBits(),
@@ -185,22 +198,27 @@ class BitFuscatorImpl final : public InstVisitor<BitFuscatorImpl, Value *> {
       V = Builder.CreateUnaryIntrinsic(Intrinsic::bswap, V);
     auto *Bits = Builder.CreateBitCast(V, VT);
     auto *Res = BitRep->convertToBit(Bits);
-    CachedCastToBit.insert({V, Res});
-    CachedCastFromBit.insert({Res, V});
+    CachedCastToBit[V].push_back(Res);
+    CachedCastFromBit[Res].push_back(V);
     return Res;
   }
   Value *convertFromBit(Value *V, Type *DestTy) {
     if (auto It = CachedCastFromBit.find(V); It != CachedCastFromBit.end()) {
-      assert(It->second->getType() == DestTy);
-      return It->second;
+      auto *Block = Builder.GetInsertBlock();
+      for (auto *Res : It->second)
+        if (Res->getType() == DestTy &&
+            (!isa<Instruction>(Res) ||
+             DT.dominates(cast<Instruction>(Res), Block)))
+          return Res;
     }
+
     assert(V->getType()->isVectorTy() && !DestTy->isVectorTy());
     auto *Bits = BitRep->convertFromBit(V);
     auto *Res = Builder.CreateBitCast(Bits, DestTy);
     if (F.getParent()->getDataLayout().isBigEndian())
       Res = Builder.CreateUnaryIntrinsic(Intrinsic::bswap, Res);
-    CachedCastToBit.insert({Res, V});
-    CachedCastFromBit.insert({V, Res});
+    CachedCastToBit[Res].push_back(V);
+    CachedCastFromBit[V].push_back(Res);
     return Res;
   }
   std::pair<Value *, Value *> fullAdder(Value *A, Value *B, Value *Carry) {
@@ -283,13 +301,16 @@ class BitFuscatorImpl final : public InstVisitor<BitFuscatorImpl, Value *> {
 
     auto *Block = Builder.GetInsertBlock();
     auto InsertPt = std::next(Builder.GetInsertPoint());
-    auto *Post = SplitBlock(Block, InsertPt);
+    auto *Post = SplitBlock(Block, InsertPt, &DTU);
     auto *Header = BasicBlock::Create(F.getContext(), "mul.header", &F);
     auto *Body = BasicBlock::Create(F.getContext(), "mul.body", &F);
     auto *Zero = getConstantWithType(Op1->getType(), BitRep->getBit0());
+    SmallVector<DominatorTree::UpdateType, 8> DTUpdates;
 
     // Pre
     Block->getTerminator()->setSuccessor(0, Header);
+    DTUpdates.push_back({DominatorTree::Delete, Block, Post});
+    DTUpdates.push_back({DominatorTree::Insert, Block, Header});
     // Header
     Builder.SetInsertPoint(Header);
     auto *Res = Builder.CreatePHI(Op1->getType(), 2);
@@ -297,6 +318,8 @@ class BitFuscatorImpl final : public InstVisitor<BitFuscatorImpl, Value *> {
     auto *B = Builder.CreatePHI(Op1->getType(), 2);
     auto *Cond = nonZero(B);
     Builder.CreateCondBr(Cond, Body, Post);
+    DTUpdates.push_back({DominatorTree::Insert, Header, Body});
+    DTUpdates.push_back({DominatorTree::Insert, Header, Post});
     // Body
     Builder.SetInsertPoint(Body);
     auto *IsOdd = BitRep->convertFromBit(
@@ -309,6 +332,7 @@ class BitFuscatorImpl final : public InstVisitor<BitFuscatorImpl, Value *> {
         addWithOverflowBits(A, A, /*Sub*/ false, /*Unsigned*/ true, Bits).first;
     auto *NextB = lshr1(B);
     Builder.CreateBr(Header);
+    DTUpdates.push_back({DominatorTree::Insert, Body, Header});
     // Phi nodes
     Res->addIncoming(Zero, Block);
     A->addIncoming(Op1, Block);
@@ -320,6 +344,7 @@ class BitFuscatorImpl final : public InstVisitor<BitFuscatorImpl, Value *> {
 
     // Post
     Builder.SetInsertPoint(Post, Post->getFirstInsertionPt());
+    DTU.applyUpdatesPermissive(DTUpdates);
     return convertFromBit(Res, V1->getType());
   }
 
@@ -349,24 +374,30 @@ public:
 
     auto *Block = Builder.GetInsertBlock();
     auto InsertPt = std::next(Builder.GetInsertPoint());
-    auto *Post = SplitBlock(Block, InsertPt);
+    auto *Post = SplitBlock(Block, InsertPt, &DTU);
     auto *Header = BasicBlock::Create(F.getContext(), "shift.header", &F);
     auto *Body = BasicBlock::Create(F.getContext(), "shift.body", &F);
+    SmallVector<DominatorTree::UpdateType, 8> DTUpdates;
 
     // Pre
     Block->getTerminator()->setSuccessor(0, Header);
+    DTUpdates.push_back({DominatorTree::Delete, Block, Post});
+    DTUpdates.push_back({DominatorTree::Insert, Block, Header});
     // Header
     Builder.SetInsertPoint(Header);
     auto *IndVar = Builder.CreatePHI(ShAmtVal->getType(), 2);
     auto *Res = Builder.CreatePHI(Src->getType(), 2);
     auto *Cond = Builder.CreateICmpNE(IndVar, ShAmt);
     Builder.CreateCondBr(Cond, Body, Post);
+    DTUpdates.push_back({DominatorTree::Insert, Header, Body});
+    DTUpdates.push_back({DominatorTree::Insert, Header, Post});
     // Body
     Builder.SetInsertPoint(Body);
     auto *NextIndVar =
         Builder.CreateAdd(IndVar, ConstantInt::get(IndVar->getType(), 1));
     auto *NextRes = Func(Res);
     Builder.CreateBr(Header);
+    DTUpdates.push_back({DominatorTree::Insert, Body, Header});
     // Phi nodes
     IndVar->addIncoming(ConstantInt::getNullValue(IndVar->getType()), Block);
     Res->addIncoming(Src, Block);
@@ -384,6 +415,7 @@ public:
       std::iota(Mask.begin(), Mask.end(), 0);
       FinalRes = Builder.CreateShuffleVector(FinalRes, Mask);
     }
+    DTU.applyUpdatesPermissive(DTUpdates);
     return convertFromBit(FinalRes, DestTy);
   }
   Value *visitShl(BinaryOperator &I) {
@@ -612,12 +644,22 @@ public:
   }
 
   BitFuscatorImpl(Function &F, FunctionAnalysisManager &FAM)
-      : F(F), Builder(F.getContext()), BitRep(getBitRep(Builder)) {}
+      : F(F), Builder(F.getContext()), BitRep(getBitRep(Builder)),
+        DT(FAM.getResult<DominatorTreeAnalysis>(F)),
+        DTU(DT, DomTreeUpdater::UpdateStrategy::Lazy) {}
 
   bool run() {
     bool Changed = false;
+    std::unordered_set<Instruction *> Set;
+    for (auto &BB : F)
+      for (auto &I : BB)
+        Set.insert(&I);
+
     for (auto &BB : F) {
       for (auto &I : BB) {
+        if (!Set.count(&I))
+          continue;
+
         Builder.SetInsertPoint(&I);
         if (auto *V = visit(I)) {
           I.replaceAllUsesWith(V);
@@ -644,8 +686,11 @@ public:
 class FSubFuscator : public PassInfoMixin<FSubFuscator> {
 public:
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &FAM) {
-    if (BitFuscatorImpl(F, FAM).run())
-      return PreservedAnalyses::none();
+    if (BitFuscatorImpl(F, FAM).run()) {
+      PreservedAnalyses PA;
+      PA.preserve<DominatorTreeAnalysis>();
+      return PA;
+    }
     return PreservedAnalyses::all();
   }
 };
