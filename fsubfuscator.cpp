@@ -104,6 +104,7 @@ int main(int argc, char **argv) {
   else
     MPM.addPass(BitcodeWriterPass(Out->os()));
   MPM.run(*M, MAM);
+  Out->keep();
 
   return EXIT_SUCCESS;
 }

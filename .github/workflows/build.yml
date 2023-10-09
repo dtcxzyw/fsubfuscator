@@ -1,0 +1,40 @@
+name: Build
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    env:
+      CMAKE_BUILD_TYPE: Release
+      CMAKE_CXX_COMPILER: g++-11
+      CMAKE_CXX_FLAGS: ""
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install dependencies (Linux)
+      run: |
+        wget -O- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
+        sudo add-apt-repository "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy main"
+        sudo apt-get update
+        sudo apt-get install z3 re2c ninja-build clang-18 llvm-18-dev
+
+    - name: Checkout Alive2
+      uses: actions/checkout@v4
+      with:
+        repository: AliveToolkit/alive2
+        path: alive2
+
+    - name: Compile Alive2
+      run: ./.github/scripts/build.sh
+      working-directory: alive2
+
+    - name: Compile
+      run: ./.github/scripts/build.sh
+
+    - name: Run Tests
+      run: cmake --build . -t test
+      working-directory: build
