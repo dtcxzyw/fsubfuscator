@@ -26,7 +26,7 @@ jobs:
     - name: Checkout Alive2
       uses: actions/checkout@v4
       with:
-        repository: AliveToolkit/alive2
+        repository: dtcxzyw/alive2
         path: alive2
 
     - name: Compile Alive2
