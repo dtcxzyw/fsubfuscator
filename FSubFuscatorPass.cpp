@@ -266,6 +266,12 @@ class BitFuscatorImpl final : public InstVisitor<BitFuscatorImpl, Value *> {
     return Builder.CreateOrReduce(BitRep->convertFromBit(Bits));
   }
   Value *equalZero(Value *Bits) { return Builder.CreateNot(nonZero(Bits)); }
+  Value *lessThanZero(Value *Bits) {
+    return BitRep->convertFromBit(Builder.CreateExtractElement(
+        Bits,
+        cast<VectorType>(Bits->getType())->getElementCount().getFixedValue() -
+            1));
+  }
   Value *lshr1(Value *Bits) {
     VectorType *VT = dyn_cast<VectorType>(Bits->getType());
     SmallVector<int, 64> Mask(VT->getElementCount().getFixedValue());
@@ -348,6 +354,178 @@ class BitFuscatorImpl final : public InstVisitor<BitFuscatorImpl, Value *> {
     return convertFromBit(Res, V1->getType());
   }
 
+  // C++ code for unsigned div/mod:
+  // std::pair<unsigned, unsigned> udivmod(unsigned a, unsigned b) {
+  //   if (b == 0)
+  //     __builtin_trap();
+  //   unsigned bit = 1;
+  //   while (b < a && (((int)b) > 0)) {
+  //     b <<= 1;
+  //     bit <<= 1;
+  //   }
+  //   unsigned q = 0;
+  //   while (true) {
+  //     if (a >= b) {
+  //       a -= b;
+  //       q |= bit;
+  //     }
+  //     b >>= 1;
+  //     bit >>= 1;
+  //     if (bit == 0)
+  //       break;
+  //   }
+  //   return {q, a};
+  // }
+
+  std::pair<Value *, Value *> udivmod(Value *V1, Value *V2) {
+    auto *Op1 = convertToBit(V1);
+    auto *Op2 = convertToBit(V2);
+
+    auto Bits = V1->getType()->getScalarSizeInBits();
+
+    auto *Block = Builder.GetInsertBlock();
+    auto InsertPt = std::next(Builder.GetInsertPoint());
+    auto *Post = SplitBlock(Block, InsertPt, &DTU);
+    auto *ShiftHeader =
+        BasicBlock::Create(F.getContext(), "divmod.shift_header", &F);
+    auto *ShiftBody =
+        BasicBlock::Create(F.getContext(), "divmod.shift_body", &F);
+    auto *SubstractHeader =
+        BasicBlock::Create(F.getContext(), "divmod.substract_header", &F);
+    auto *SubstractBody =
+        BasicBlock::Create(F.getContext(), "divmod.substract_body", &F);
+    auto *DividedByZero =
+        BasicBlock::Create(F.getContext(), "divmod.divided_by_zero", &F);
+    auto *Zero = getConstantWithType(Op1->getType(), BitRep->getBit0());
+    auto *One = Builder.CreateInsertElement(Zero, BitRep->getBit1(),
+                                            Builder.getInt64(0));
+    SmallVector<DominatorTree::UpdateType, 8> DTUpdates;
+
+    // Pre
+    Block->getTerminator()->eraseFromParent();
+    DTUpdates.push_back({DominatorTree::Delete, Block, Post});
+    Builder.SetInsertPoint(Block);
+    auto *IsZero = equalZero(Op2);
+    Builder.CreateCondBr(IsZero, DividedByZero, ShiftHeader);
+    DTUpdates.push_back({DominatorTree::Insert, Block, DividedByZero});
+    DTUpdates.push_back({DominatorTree::Insert, Block, ShiftHeader});
+    // DividedByZero
+    Builder.SetInsertPoint(DividedByZero);
+    Builder.CreateIntrinsic(Intrinsic::trap, {}, {});
+    Builder.CreateUnreachable();
+    // ShiftHeader
+    Builder.SetInsertPoint(ShiftHeader);
+    // a u<= b || b s< 0
+    auto EvalCondExpr = [&](Value *A, Value *B) {
+      auto [Res, Carry] =
+          addWithOverflowBits(A, B,
+                              /*Sub*/ true, /*Unsigned*/ true, Bits);
+      auto *Cond1 =
+          Builder.CreateOr(BitRep->convertFromBit(Carry), equalZero(Res));
+      auto *Cond2 = lessThanZero(B);
+      auto *Cond = Builder.CreateOr(Cond1, Cond2);
+      return Cond;
+    };
+    Builder.CreateCondBr(EvalCondExpr(Op1, Op2), SubstractHeader, ShiftBody);
+    DTUpdates.push_back({DominatorTree::Insert, ShiftHeader, SubstractHeader});
+    DTUpdates.push_back({DominatorTree::Insert, ShiftHeader, ShiftBody});
+    // ShiftBody
+    Builder.SetInsertPoint(ShiftBody);
+    auto *B = Builder.CreatePHI(Op1->getType(), 2);
+    auto *Bit = Builder.CreatePHI(Op1->getType(), 2);
+    auto *NextB = lshr1(B);
+    auto *NextBit = lshr1(Bit);
+    // a u<= NextB || NextB s< 0
+    Builder.CreateCondBr(EvalCondExpr(Op1, NextB), SubstractHeader, ShiftBody);
+    DTUpdates.push_back({DominatorTree::Insert, ShiftBody, SubstractHeader});
+    DTUpdates.push_back({DominatorTree::Insert, ShiftBody, ShiftBody});
+    B->addIncoming(Op2, ShiftHeader);
+    Bit->addIncoming(One, ShiftHeader);
+    B->addIncoming(NextB, ShiftBody);
+    Bit->addIncoming(NextBit, ShiftBody);
+    // SubstractHeader
+    Builder.SetInsertPoint(SubstractHeader);
+    auto *InitB = Builder.CreatePHI(Op1->getType(), 2);
+    auto *InitBit = Builder.CreatePHI(Op1->getType(), 2);
+    InitB->addIncoming(Op2, ShiftHeader);
+    InitBit->addIncoming(One, ShiftHeader);
+    InitB->addIncoming(NextB, ShiftBody);
+    InitBit->addIncoming(NextBit, ShiftBody);
+    Builder.CreateBr(SubstractBody);
+    DTUpdates.push_back(
+        {DominatorTree::Insert, SubstractHeader, SubstractBody});
+    // SubstractBody
+    Builder.SetInsertPoint(SubstractBody);
+    auto *PhiA = Builder.CreatePHI(Op1->getType(), 2);
+    auto *PhiB = Builder.CreatePHI(Op1->getType(), 2);
+    auto *PhiBit = Builder.CreatePHI(Op1->getType(), 2);
+    auto *PhiRes = Builder.CreatePHI(Op1->getType(), 2);
+    // a u< b
+    auto [Sub, Carry] =
+        addWithOverflowBits(PhiA, PhiB, /*Sub*/ true, /*Unsigned*/ true, Bits);
+    auto *Cond = BitRep->convertFromBit(Carry);
+    auto *NextPhiA = Builder.CreateSelect(Cond, PhiA, Sub);
+    auto *NextPhiRes =
+        Builder.CreateSelect(Cond, PhiRes, BitRep->bitOr(PhiRes, PhiBit));
+    auto *NextPhiBit = lshr1(PhiBit);
+    auto *NextPhiB = lshr1(PhiB);
+    Builder.CreateCondBr(equalZero(NextPhiA), Post, SubstractBody);
+    DTUpdates.push_back({DominatorTree::Insert, SubstractBody, Post});
+    DTUpdates.push_back({DominatorTree::Insert, SubstractBody, SubstractBody});
+    PhiA->addIncoming(Op1, SubstractHeader);
+    PhiB->addIncoming(InitB, SubstractHeader);
+    PhiBit->addIncoming(InitBit, SubstractHeader);
+    PhiRes->addIncoming(Zero, SubstractHeader);
+    PhiA->addIncoming(NextPhiA, SubstractBody);
+    PhiB->addIncoming(NextPhiB, SubstractBody);
+    PhiBit->addIncoming(NextPhiBit, SubstractBody);
+    PhiRes->addIncoming(NextPhiRes, SubstractBody);
+    // Post
+    Builder.SetInsertPoint(Post, Post->getFirstInsertionPt());
+    DTU.applyUpdatesPermissive(DTUpdates);
+
+    auto *Quotient = convertFromBit(NextPhiRes, V1->getType());
+    auto *Remainder = convertFromBit(NextPhiA, V1->getType());
+    return {Quotient, Remainder};
+  }
+
+  // C++ code for signed div/mod:
+  // std::pair<int, int> sdivmod(int a, int b) {
+  //   bool NegB = false;
+  //   if (b < 0) {
+  //     b = -b;
+  //     NegB = true;
+  //   }
+  //   bool NegA = false;
+  //   if (a < 0) {
+  //     a = -a;
+  //     NegA = true;
+  //   }
+  //   auto [q, r] = udivmod(a, b);
+  //   if (NegA)
+  //     r = -r;
+  //   if (NegA ^ NegB)
+  //     q = -q;
+  //   return {q, r};
+  // }
+
+  std::pair<Value *, Value *> sdivmod(Value *V1, Value *V2) {
+    // TODO: use Bits
+    auto *NegA =
+        Builder.CreateICmpSLT(V1, Constant::getNullValue(V1->getType()));
+    auto *NegB =
+        Builder.CreateICmpSLT(V2, Constant::getNullValue(V2->getType()));
+    auto *A = Builder.CreateSelect(NegA, Builder.CreateNeg(V1), V1);
+    auto *B = Builder.CreateSelect(NegB, Builder.CreateNeg(V2), V2);
+    auto [Quotient, Remainder] = udivmod(A, B);
+    auto *NegRemainder = Builder.CreateNeg(Remainder);
+    auto *NegQuotient = Builder.CreateNeg(Quotient);
+    auto *FinalRemainder = Builder.CreateSelect(NegA, NegRemainder, Remainder);
+    auto *FinalQuotient = Builder.CreateSelect(Builder.CreateXor(NegA, NegB),
+                                               NegQuotient, Quotient);
+    return {FinalQuotient, FinalRemainder};
+  }
+
 public:
   // rewrites
   Value *visitInstruction(Instruction &I) { return nullptr; }
@@ -364,10 +542,18 @@ public:
   Value *visitMul(BinaryOperator &I) {
     return mult(I.getOperand(0), I.getOperand(1));
   }
-  Value *visitSDiv(BinaryOperator &I) { return nullptr; }
-  Value *visitUDiv(BinaryOperator &I) { return nullptr; }
-  Value *visitSRem(BinaryOperator &I) { return nullptr; }
-  Value *visitURem(BinaryOperator &I) { return nullptr; }
+  Value *visitSDiv(BinaryOperator &I) {
+    return sdivmod(I.getOperand(0), I.getOperand(1)).first;
+  }
+  Value *visitUDiv(BinaryOperator &I) {
+    return udivmod(I.getOperand(0), I.getOperand(1)).first;
+  }
+  Value *visitSRem(BinaryOperator &I) {
+    return sdivmod(I.getOperand(0), I.getOperand(1)).second;
+  }
+  Value *visitURem(BinaryOperator &I) {
+    return udivmod(I.getOperand(0), I.getOperand(1)).second;
+  }
   template <typename ShiftOnce>
   Value *visitShift(Type *DestTy, Value *Src, Value *ShAmtVal, ShiftOnce Func) {
     auto *ShAmt = Builder.CreateFreeze(ShAmtVal);

@@ -181,6 +181,26 @@ define i4 @fshr(i4 %a, i4 %b, i4 %c) {
   ret i4 %d
 }
 
+define i4 @udiv(i4 %a, i4 %b) {
+  %c = udiv i4 %a, %b
+  ret i4 %c
+}
+
+define i4 @urem(i4 %a, i4 %b) {
+  %c = urem i4 %a, %b
+  ret i4 %c
+}
+
+define i4 @sdiv(i4 %a, i4 %b) {
+  %c = sdiv i4 %a, %b
+  ret i4 %c
+}
+
+define i4 @srem(i4 %a, i4 %b) {
+  %c = srem i4 %a, %b
+  ret i4 %c
+}
+
 declare {i4, i1} @llvm.uadd.with.overflow.i4(i4 %a, i4 %b)
 declare {i4, i1} @llvm.usub.with.overflow.i4(i4 %a, i4 %b)
 declare {i4, i1} @llvm.sadd.with.overflow.i4(i4 %a, i4 %b)
