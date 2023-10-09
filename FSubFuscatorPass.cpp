@@ -543,16 +543,24 @@ public:
     return mult(I.getOperand(0), I.getOperand(1));
   }
   Value *visitSDiv(BinaryOperator &I) {
-    return sdivmod(I.getOperand(0), I.getOperand(1)).first;
+    auto *V0 = Builder.CreateFreeze(I.getOperand(0));
+    auto *V1 = Builder.CreateFreeze(I.getOperand(1));
+    return sdivmod(V0, V1).first;
   }
   Value *visitUDiv(BinaryOperator &I) {
-    return udivmod(I.getOperand(0), I.getOperand(1)).first;
+    auto *V0 = Builder.CreateFreeze(I.getOperand(0));
+    auto *V1 = Builder.CreateFreeze(I.getOperand(1));
+    return udivmod(V0, V1).first;
   }
   Value *visitSRem(BinaryOperator &I) {
-    return sdivmod(I.getOperand(0), I.getOperand(1)).second;
+    auto *V0 = Builder.CreateFreeze(I.getOperand(0));
+    auto *V1 = Builder.CreateFreeze(I.getOperand(1));
+    return sdivmod(V0, V1).second;
   }
   Value *visitURem(BinaryOperator &I) {
-    return udivmod(I.getOperand(0), I.getOperand(1)).second;
+    auto *V0 = Builder.CreateFreeze(I.getOperand(0));
+    auto *V1 = Builder.CreateFreeze(I.getOperand(1));
+    return udivmod(V0, V1).second;
   }
   template <typename ShiftOnce>
   Value *visitShift(Type *DestTy, Value *Src, Value *ShAmtVal, ShiftOnce Func) {
