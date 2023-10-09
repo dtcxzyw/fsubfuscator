@@ -30,7 +30,7 @@ jobs:
         path: alive2
 
     - name: Compile Alive2
-      run: ./.github/scripts/build.sh
+      run: ${{github.workspace}}/.github/scripts/build-tv.sh
       working-directory: alive2
 
     - name: Compile
