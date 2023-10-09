@@ -40,10 +40,18 @@
 
 cl::OptionCategory FsubFuscatorCategory("fsub fuscator options");
 
-static cl::opt<bool>
-    Verify("V",
-           cl::desc("Use Int1BitRep instead of FSubBitRep for verification"),
-           cl::cat(FsubFuscatorCategory));
+enum BitRepMethod {
+  FSub,
+  Int1,
+  InvInt1,
+};
+
+static cl::opt<BitRepMethod> RepMethod(
+    "bitrep", cl::desc("Bit representation to use"),
+    cl::values(clEnumVal(FSub, "Default: Use fsub and f32. (T=0.0, F=-0.0)"),
+               clEnumVal(Int1, "Use bitwise and i1. (T=true, F=false)"),
+               clEnumVal(InvInt1, "Use bitwise and i1. (T=false, F=true)")),
+    cl::init(FSub), cl::cat(FsubFuscatorCategory));
 
 static Value *getConstantWithType(const Type *T, Constant *Val) {
   if (!T->isVectorTy())
@@ -127,6 +135,36 @@ struct Int1BitRep final : public BitRepBase {
   Value *bitNot(Value *V) override { return Builder.CreateNot(V); }
   Value *bitOr(Value *V1, Value *V2) override {
     return Builder.CreateOr(V1, V2);
+  }
+  Value *bitAnd(Value *V1, Value *V2) override {
+    return Builder.CreateAnd(V1, V2);
+  }
+  Value *bitXor(Value *V1, Value *V2) override {
+    return Builder.CreateXor(V1, V2);
+  }
+};
+
+struct InvInt1BitRep final : public BitRepBase {
+  explicit InvInt1BitRep(IRBuilder<> &Builder) : BitRepBase(Builder) {}
+
+  Type *getBitTy() override { return Builder.getInt1Ty(); }
+  Constant *getBit0() override { return Builder.getTrue(); }
+  Constant *getBit1() override { return Builder.getFalse(); }
+
+  // handle vector of i1
+  Value *convertToBit(Value *V) override { return Builder.CreateNot(V); }
+  // handle vector of bitTy
+  Value *convertFromBit(Value *V) override { return Builder.CreateNot(V); }
+
+  Value *bitNot(Value *V) override { return Builder.CreateNot(V); }
+  Value *bitOr(Value *V1, Value *V2) override {
+    return Builder.CreateAnd(V1, V2);
+  }
+  Value *bitAnd(Value *V1, Value *V2) override {
+    return Builder.CreateOr(V1, V2);
+  }
+  Value *bitXor(Value *V1, Value *V2) override {
+    return Builder.CreateICmpEQ(V1, V2);
   }
 };
 
@@ -361,18 +399,24 @@ public:
                       I.getOperand(1), [&](Value *V) { return lshr1(V); });
   }
   Value *visitAnd(BinaryOperator &I) {
+    if (I.getType()->isVectorTy())
+      return nullptr;
     auto *Op0 = convertToBit(I.getOperand(0));
     auto *Op1 = convertToBit(I.getOperand(1));
     auto *Res = BitRep->bitAnd(Op0, Op1);
     return convertFromBit(Res, I.getType());
   }
   Value *visitOr(BinaryOperator &I) {
+    if (I.getType()->isVectorTy())
+      return nullptr;
     auto *Op0 = convertToBit(I.getOperand(0));
     auto *Op1 = convertToBit(I.getOperand(1));
     auto *Res = BitRep->bitOr(Op0, Op1);
     return convertFromBit(Res, I.getType());
   }
   Value *visitXor(BinaryOperator &I) {
+    if (I.getType()->isVectorTy())
+      return nullptr;
     auto *Op0 = convertToBit(I.getOperand(0));
     auto *Op1 = convertToBit(I.getOperand(1));
     auto *Res = BitRep->bitXor(Op0, Op1);
@@ -555,9 +599,16 @@ public:
   }
 
   static std::unique_ptr<BitRepBase> getBitRep(IRBuilder<> &Builder) {
-    if (Verify)
+    switch (RepMethod) {
+    case FSub:
+      return std::make_unique<FSubBitRep>(Builder);
+    case Int1:
       return std::make_unique<Int1BitRep>(Builder);
-    return std::make_unique<FSubBitRep>(Builder);
+    case InvInt1:
+      return std::make_unique<InvInt1BitRep>(Builder);
+    default:
+      llvm_unreachable("Unexpected bit representation method");
+    }
   }
 
   BitFuscatorImpl(Function &F, FunctionAnalysisManager &FAM)
