@@ -14,6 +14,7 @@
 */
 
 #include "FSubFuscatorPass.hpp"
+#include "llvm/IR/IntrinsicInst.h"
 #include <llvm/ADT/APFloat.h>
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/DenseMap.h>
@@ -742,7 +743,6 @@ public:
     return nullptr;
   }
   Value *visitIntrinsicInst(IntrinsicInst &I) {
-    // TODO: max/min/bitmanip/funnel shift
     switch (I.getIntrinsicID()) {
     case Intrinsic::uadd_with_overflow:
     case Intrinsic::usub_with_overflow: {
@@ -818,6 +818,32 @@ public:
       auto *Bits = convertToBit(I.getOperand(0));
       auto *Res = Builder.CreateVectorReverse(Bits);
       return convertFromBit(Res, I.getType());
+    }
+    case Intrinsic::smin:
+    case Intrinsic::smax:
+    case Intrinsic::umin:
+    case Intrinsic::umax: {
+      auto *Op0 = Builder.CreateFreeze(I.getOperand(0));
+      auto *Op1 = Builder.CreateFreeze(I.getOperand(1));
+      auto Signed = MinMaxIntrinsic::isSigned(I.getIntrinsicID());
+      auto Bits = Op0->getType()->getScalarSizeInBits();
+      auto *LHS = convertToBit(Op0);
+      auto *RHS = convertToBit(Op1);
+      auto [Res, Carry] =
+          addWithOverflowBits(LHS, RHS, /*Sub*/ true, !Signed, Bits);
+      Value *LessThan;
+      if (Signed)
+        LessThan =
+            Builder.CreateXor(BitRep->convertFromBit(Carry), lessThanZero(Res));
+      else
+        LessThan = BitRep->convertFromBit(Carry);
+      Value *ResVal = nullptr;
+      if (I.getIntrinsicID() == Intrinsic::smin ||
+          I.getIntrinsicID() == Intrinsic::umin)
+        ResVal = Builder.CreateSelect(LessThan, LHS, RHS);
+      else
+        ResVal = Builder.CreateSelect(LessThan, RHS, LHS);
+      return convertFromBit(ResVal, I.getType());
     }
     default:
       return nullptr;
