@@ -14,21 +14,24 @@
 */
 
 #include "FSubFuscatorPass.hpp"
-#include "llvm/ADT/SmallVector.h"
-#include "llvm/IR/Instructions.h"
-#include "llvm/Support/ErrorHandling.h"
 #include <llvm/ADT/APFloat.h>
 #include <llvm/ADT/ArrayRef.h>
+#include <llvm/ADT/DenseMap.h>
+#include <llvm/ADT/SmallVector.h>
 #include <llvm/IR/Constant.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/InstVisitor.h>
 #include <llvm/IR/InstrTypes.h>
+#include <llvm/IR/Instructions.h>
 #include <llvm/IR/Intrinsics.h>
 #include <llvm/IR/PassManager.h>
 #include <llvm/IR/Value.h>
+#include <llvm/Support/ErrorHandling.h>
+#include <llvm/Transforms/InstCombine/InstCombine.h>
 #include <llvm/Transforms/Utils/BasicBlockUtils.h>
+#include <llvm/Transforms/Utils/Local.h>
 #include <algorithm>
 #include <cassert>
 #include <iterator>
@@ -130,8 +133,11 @@ class BitFuscatorImpl final : public InstVisitor<BitFuscatorImpl, Value *> {
   Function &F;
   IRBuilder<> Builder;
   std::unique_ptr<BitRepBase> BitRep;
+  llvm::DenseMap<Value *, Value *> CachedCastToBit, CachedCastFromBit;
 
   Value *convertToBit(Value *V) {
+    if (auto It = CachedCastToBit.find(V); It != CachedCastToBit.end())
+      return It->second;
     assert(!V->getType()->isVectorTy());
     auto *VT = VectorType::get(Builder.getInt1Ty(),
                                V->getType()->getScalarSizeInBits(),
@@ -139,14 +145,23 @@ class BitFuscatorImpl final : public InstVisitor<BitFuscatorImpl, Value *> {
     if (F.getParent()->getDataLayout().isBigEndian())
       V = Builder.CreateUnaryIntrinsic(Intrinsic::bswap, V);
     auto *Bits = Builder.CreateBitCast(V, VT);
-    return BitRep->convertToBit(Bits);
+    auto *Res = BitRep->convertToBit(Bits);
+    CachedCastToBit.insert({V, Res});
+    CachedCastFromBit.insert({Res, V});
+    return Res;
   }
   Value *convertFromBit(Value *V, Type *DestTy) {
+    if (auto It = CachedCastFromBit.find(V); It != CachedCastFromBit.end()) {
+      assert(It->second->getType() == DestTy);
+      return It->second;
+    }
     assert(V->getType()->isVectorTy() && !DestTy->isVectorTy());
     auto *Bits = BitRep->convertFromBit(V);
     auto *Res = Builder.CreateBitCast(Bits, DestTy);
     if (F.getParent()->getDataLayout().isBigEndian())
       Res = Builder.CreateUnaryIntrinsic(Intrinsic::bswap, Res);
+    CachedCastToBit.insert({Res, V});
+    CachedCastFromBit.insert({V, Res});
     return Res;
   }
   std::pair<Value *, Value *> fullAdder(Value *A, Value *B, Value *Carry) {
@@ -352,8 +367,11 @@ public:
     auto *Res = BitRep->bitXor(Op0, Op1);
     return convertFromBit(Res, I.getType());
   }
-  Value *visitCast(CastInst &I, bool NullOp1, ArrayRef<int> Mask) {
-    auto *Op0 = convertToBit(I.getOperand(0));
+  Value *visitCast(CastInst &I, bool NullOp1, bool Freeze, ArrayRef<int> Mask) {
+    auto *V = I.getOperand(0);
+    if (Freeze)
+      V = Builder.CreateFreeze(V);
+    auto *Op0 = convertToBit(V);
     auto *Res = Builder.CreateShuffleVector(
         Op0,
         NullOp1 ? getConstantWithType(Op0->getType(), BitRep->getBit0())
@@ -365,7 +383,7 @@ public:
     auto DestBits = I.getType()->getScalarSizeInBits();
     SmallVector<int, 64> Mask(DestBits);
     std::iota(Mask.begin(), Mask.end(), 0);
-    return visitCast(I, /*NullOp1*/ false, Mask);
+    return visitCast(I, /*NullOp1*/ false, /*Freeze*/ false, Mask);
   }
   Value *visitZExt(ZExtInst &I) {
     auto DestBits = I.getType()->getScalarSizeInBits();
@@ -373,7 +391,7 @@ public:
     SmallVector<int, 64> Mask(DestBits);
     std::iota(Mask.begin(), Mask.begin() + SrcBits, 0);
     std::fill(Mask.begin() + SrcBits, Mask.end(), SrcBits);
-    return visitCast(I, /*NullOp1*/ true, Mask);
+    return visitCast(I, /*NullOp1*/ true, /*Freeze*/ false, Mask);
   }
   Value *visitSExt(SExtInst &I) {
     auto DestBits = I.getType()->getScalarSizeInBits();
@@ -381,7 +399,7 @@ public:
     SmallVector<int, 64> Mask(DestBits);
     std::iota(Mask.begin(), Mask.begin() + SrcBits, 0);
     std::fill(Mask.begin() + SrcBits, Mask.end(), SrcBits - 1);
-    return visitCast(I, /*NullOp1*/ false, Mask);
+    return visitCast(I, /*NullOp1*/ false, /*Freeze*/ true, Mask);
   }
   Value *visitICmp(ICmpInst &I) {
     if (!I.getType()->isIntegerTy())
@@ -502,7 +520,16 @@ public:
       }
     }
 
-    // clean up int-bitvec-int converts
+    // clean up
+    while (true) {
+      bool Simplified = false;
+      for (auto &BB : F)
+        Simplified |= SimplifyInstructionsInBlock(&BB);
+      if (Simplified)
+        Changed = true;
+      else
+        break;
+    }
 
     return Changed;
   }
@@ -521,5 +548,6 @@ void addFSubFuscatorPasses(FunctionPassManager &PM, OptimizationLevel Level) {
   PM.addPass(FSubFuscator());
   if (Level != OptimizationLevel::O0) {
     // post clean up
+    PM.addPass(InstCombinePass());
   }
 }

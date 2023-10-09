@@ -143,6 +143,19 @@ define i4 @ashr(i4 %a, i4 %b) {
   ret i4 %c
 }
 
+define i2 @add_chain(i2 %a, i2 %b, i2 %c) {
+  %x = add i2 %a, %b
+  %y = add i2 %x, %c
+  ret i2 %y
+}
+
+define i2 @add_reuse(i2 %a, i2 %b, i2 %c) {
+  %x = add i2 %a, %b
+  %y = add i2 %a, %c
+  %z = add i2 %x, %y
+  ret i2 %z
+}
+
 declare {i4, i1} @llvm.uadd.with.overflow.i4(i4 %a, i4 %b)
 declare {i4, i1} @llvm.usub.with.overflow.i4(i4 %a, i4 %b)
 declare {i4, i1} @llvm.sadd.with.overflow.i4(i4 %a, i4 %b)
