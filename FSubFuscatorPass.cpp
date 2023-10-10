@@ -19,6 +19,7 @@
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/SmallVector.h>
+#include <llvm/ADT/StringSwitch.h>
 #include <llvm/Analysis/DomTreeUpdater.h>
 #include <llvm/IR/Constant.h>
 #include <llvm/IR/Constants.h>
@@ -52,7 +53,7 @@ static cl::opt<BitRepMethod> RepMethod(
     cl::values(clEnumVal(FSub, "Default: Use fsub and f32. (T=0.0, F=-0.0)"),
                clEnumVal(Int1, "Use bitwise and i1. (T=true, F=false)"),
                clEnumVal(InvInt1, "Use bitwise and i1. (T=false, F=true)")),
-    cl::init(FSub), cl::cat(FsubFuscatorCategory));
+    cl::init(DefaultBitRep), cl::cat(FsubFuscatorCategory));
 
 class BitFuscatorImpl final : public InstVisitor<BitFuscatorImpl, Value *> {
   Function &F;
@@ -493,17 +494,26 @@ public:
     DTU.applyUpdatesPermissive(DTUpdates);
     return convertFromBit(FinalRes, DestTy);
   }
+  Value *getReducedShAmt(Value *ShAmt) {
+    return Builder.CreateBinaryIntrinsic(
+        Intrinsic::umin, ShAmt,
+        ConstantInt::get(ShAmt->getType(),
+                         ShAmt->getType()->getScalarSizeInBits()));
+  }
   Value *visitShl(BinaryOperator &I) {
     return visitShift(I.getType(), convertToBit(I.getOperand(0)),
-                      I.getOperand(1), [&](Value *V) { return shl1(V); });
+                      getReducedShAmt(I.getOperand(1)),
+                      [&](Value *V) { return shl1(V); });
   }
   Value *visitAShr(BinaryOperator &I) {
     return visitShift(I.getType(), convertToBit(I.getOperand(0)),
-                      I.getOperand(1), [&](Value *V) { return ashr1(V); });
+                      getReducedShAmt(I.getOperand(1)),
+                      [&](Value *V) { return ashr1(V); });
   }
   Value *visitLShr(BinaryOperator &I) {
     return visitShift(I.getType(), convertToBit(I.getOperand(0)),
-                      I.getOperand(1), [&](Value *V) { return lshr1(V); });
+                      getReducedShAmt(I.getOperand(1)),
+                      [&](Value *V) { return lshr1(V); });
   }
   Value *visitAnd(BinaryOperator &I) {
     if (I.getType()->isVectorTy())
@@ -670,11 +680,18 @@ public:
       SmallVector<int, 128> Mask(BitWidth * 2);
       std::iota(Mask.begin(), Mask.end(), 0);
       auto *Combined = Builder.CreateShuffleVector(BitsA, BitsB, Mask);
-      return visitShift(I.getType(), Combined, I.getOperand(2), [&](Value *V) {
-        if (I.getIntrinsicID() == Intrinsic::fshl)
-          return shl1(V);
-        return lshr1(V);
-      });
+      return visitShift(
+          I.getType(), Combined,
+          Builder.CreateURem(
+              I.getOperand(2),
+              ConstantInt::get(
+                  I.getOperand(2)->getType(),
+                  I.getOperand(2)->getType()->getScalarSizeInBits())),
+          [&](Value *V) {
+            if (I.getIntrinsicID() == Intrinsic::fshl)
+              return shl1(V);
+            return lshr1(V);
+          });
     }
     case Intrinsic::abs: {
       auto *Op0 = I.getOperand(0);
@@ -730,9 +747,22 @@ public:
     }
   }
 
+  static BitRepMethod getRepMethod() {
+    // Resolve from environment variable
+    auto *Env = getenv("FSUBFUSCATOR_BITREP_OVERRIDE");
+    if (Env) {
+      return StringSwitch<BitRepMethod>(StringRef{Env})
+          .Case("Int1", BitRepMethod::Int1)
+          .Case("InvInt1", BitRepMethod::InvInt1)
+          .Case("FSub", BitRepMethod::FSub)
+          .Default(BitRepMethod::DefaultBitRep);
+    }
+    return RepMethod;
+  }
+
   BitFuscatorImpl(Function &F, FunctionAnalysisManager &FAM)
       : F(F), Builder(F.getContext()),
-        BitRep(BitRepBase::createBitRep(Builder, RepMethod)),
+        BitRep(BitRepBase::createBitRep(Builder, getRepMethod())),
         DT(FAM.getResult<DominatorTreeAnalysis>(F)),
         DTU(DT, DomTreeUpdater::UpdateStrategy::Lazy) {}
 

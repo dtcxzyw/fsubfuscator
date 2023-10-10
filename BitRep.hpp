@@ -21,6 +21,8 @@ enum BitRepMethod {
   FSub,
   Int1,
   InvInt1,
+
+  DefaultBitRep = FSub,
 };
 
 struct BitRepBase {

@@ -37,5 +37,5 @@ jobs:
       run: ./.github/scripts/build.sh
 
     - name: Run Tests
-      run: cmake --build . -t test
+      run: ctest
       working-directory: build
