@@ -13,8 +13,8 @@
     limitations under the License.
 */
 
+#include "BitRep.hpp"
 #include "FSubFuscatorPass.hpp"
-#include "llvm/IR/IntrinsicInst.h"
 #include <llvm/ADT/APFloat.h>
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/DenseMap.h>
@@ -29,6 +29,7 @@
 #include <llvm/IR/InstrTypes.h>
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Instructions.h>
+#include <llvm/IR/IntrinsicInst.h>
 #include <llvm/IR/Intrinsics.h>
 #include <llvm/IR/PassManager.h>
 #include <llvm/IR/Value.h>
@@ -46,133 +47,12 @@
 
 cl::OptionCategory FsubFuscatorCategory("fsub fuscator options");
 
-enum BitRepMethod {
-  FSub,
-  Int1,
-  InvInt1,
-};
-
 static cl::opt<BitRepMethod> RepMethod(
     "bitrep", cl::desc("Bit representation to use"),
     cl::values(clEnumVal(FSub, "Default: Use fsub and f32. (T=0.0, F=-0.0)"),
                clEnumVal(Int1, "Use bitwise and i1. (T=true, F=false)"),
                clEnumVal(InvInt1, "Use bitwise and i1. (T=false, F=true)")),
     cl::init(FSub), cl::cat(FsubFuscatorCategory));
-
-static Value *getConstantWithType(const Type *T, Constant *Val) {
-  if (!T->isVectorTy())
-    return Val;
-  return ConstantVector::getSplat(dyn_cast<VectorType>(T)->getElementCount(),
-                                  Val);
-}
-
-struct BitRepBase {
-  IRBuilder<> &Builder;
-
-  explicit BitRepBase(IRBuilder<> &Builder) : Builder(Builder) {}
-  virtual ~BitRepBase() = default;
-
-  virtual Type *getBitTy() = 0;
-  virtual Constant *getBit0() = 0;
-  virtual Constant *getBit1() = 0;
-
-  // handle vector of i1
-  virtual Value *convertToBit(Value *V) = 0;
-  // handle vector of bitTy
-  virtual Value *convertFromBit(Value *V) = 0;
-  virtual Value *bitNot(Value *V) = 0;
-  virtual Value *bitOr(Value *V1, Value *V2) = 0;
-  virtual Value *bitAnd(Value *V1, Value *V2) {
-    return bitNot(bitOr(bitNot(V1), bitNot(V2)));
-  }
-  virtual Value *bitXor(Value *V1, Value *V2) {
-    return bitOr(bitAnd(bitNot(V1), V2), bitAnd(V1, bitNot(V2)));
-  }
-};
-
-struct FSubBitRep final : public BitRepBase {
-  explicit FSubBitRep(IRBuilder<> &Builder) : BitRepBase(Builder) {}
-
-  Type *getBitTy() override { return Builder.getFloatTy(); }
-  Constant *getBit0() override {
-    return ConstantFP::get(getBitTy(),
-                           APFloat::getZero(APFloat::IEEEsingle(), true));
-  }
-  Constant *getBit1() override {
-    return ConstantFP::get(getBitTy(),
-                           APFloat::getZero(APFloat::IEEEsingle(), false));
-  }
-
-  // handle vector of i1
-  Value *convertToBit(Value *V) override {
-    const auto *BitTy =
-        dyn_cast<VectorType>(V->getType()->getWithNewType(getBitTy()));
-    auto *Bit1 = getConstantWithType(BitTy, getBit1());
-    auto *Bit0 = getConstantWithType(BitTy, getBit0());
-    return Builder.CreateSelect(V, Bit1, Bit0);
-  }
-  // handle vector of bitTy
-  Value *convertFromBit(Value *V) override {
-    auto *IntTy = V->getType()->getWithNewType(Builder.getInt32Ty());
-    return Builder.CreateICmpSGE(Builder.CreateBitCast(V, IntTy),
-                                 ConstantInt::getNullValue(IntTy));
-  }
-
-  Value *bitNot(Value *V) override {
-    return Builder.CreateFSub(getConstantWithType(V->getType(), getBit0()), V);
-  }
-  Value *bitOr(Value *V1, Value *V2) override {
-    return Builder.CreateFSub(V1, bitNot(V2));
-  }
-};
-
-struct Int1BitRep final : public BitRepBase {
-  explicit Int1BitRep(IRBuilder<> &Builder) : BitRepBase(Builder) {}
-
-  Type *getBitTy() override { return Builder.getInt1Ty(); }
-  Constant *getBit0() override { return Builder.getFalse(); }
-  Constant *getBit1() override { return Builder.getTrue(); }
-
-  // handle vector of i1
-  Value *convertToBit(Value *V) override { return V; }
-  // handle vector of bitTy
-  Value *convertFromBit(Value *V) override { return V; }
-
-  Value *bitNot(Value *V) override { return Builder.CreateNot(V); }
-  Value *bitOr(Value *V1, Value *V2) override {
-    return Builder.CreateOr(V1, V2);
-  }
-  Value *bitAnd(Value *V1, Value *V2) override {
-    return Builder.CreateAnd(V1, V2);
-  }
-  Value *bitXor(Value *V1, Value *V2) override {
-    return Builder.CreateXor(V1, V2);
-  }
-};
-
-struct InvInt1BitRep final : public BitRepBase {
-  explicit InvInt1BitRep(IRBuilder<> &Builder) : BitRepBase(Builder) {}
-
-  Type *getBitTy() override { return Builder.getInt1Ty(); }
-  Constant *getBit0() override { return Builder.getTrue(); }
-  Constant *getBit1() override { return Builder.getFalse(); }
-
-  // handle vector of i1
-  Value *convertToBit(Value *V) override { return Builder.CreateNot(V); }
-  // handle vector of bitTy
-  Value *convertFromBit(Value *V) override { return Builder.CreateNot(V); }
-
-  Value *bitNot(Value *V) override { return Builder.CreateNot(V); }
-  Value *bitOr(Value *V1, Value *V2) override {
-    return Builder.CreateAnd(V1, V2);
-  }
-  Value *bitAnd(Value *V1, Value *V2) override {
-    return Builder.CreateOr(V1, V2);
-  }
-  Value *bitXor(Value *V1, Value *V2) override {
-    return Builder.CreateICmpEQ(V1, V2);
-  }
-};
 
 class BitFuscatorImpl final : public InstVisitor<BitFuscatorImpl, Value *> {
   Function &F;
@@ -850,21 +730,9 @@ public:
     }
   }
 
-  static std::unique_ptr<BitRepBase> getBitRep(IRBuilder<> &Builder) {
-    switch (RepMethod) {
-    case FSub:
-      return std::make_unique<FSubBitRep>(Builder);
-    case Int1:
-      return std::make_unique<Int1BitRep>(Builder);
-    case InvInt1:
-      return std::make_unique<InvInt1BitRep>(Builder);
-    default:
-      llvm_unreachable("Unexpected bit representation method");
-    }
-  }
-
   BitFuscatorImpl(Function &F, FunctionAnalysisManager &FAM)
-      : F(F), Builder(F.getContext()), BitRep(getBitRep(Builder)),
+      : F(F), Builder(F.getContext()),
+        BitRep(BitRepBase::createBitRep(Builder, RepMethod)),
         DT(FAM.getResult<DominatorTreeAnalysis>(F)),
         DTU(DT, DomTreeUpdater::UpdateStrategy::Lazy) {}
 

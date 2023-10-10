@@ -1,5 +1,7 @@
 BasedOnStyle: LLVM
 IncludeCategories:
+- Regex: "BitRep.hpp"
+  Priority: 0
 - Regex: "FSubFuscatorPass.hpp"
   Priority: 1
 - Regex: "llvm/"
