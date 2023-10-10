@@ -1,0 +1,4 @@
+#!/bin/sh
+
+@CLANGXX@ -fpass-plugin=@CMAKE_BINARY_DIR@/fsubfuscator_plugin.so $@
+exit $?

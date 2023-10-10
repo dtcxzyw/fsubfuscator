@@ -1,0 +1,4 @@
+#!/bin/sh
+
+@OPT@ -load-pass-plugin @CMAKE_BINARY_DIR@/fsubfuscator_plugin.so $@
+exit $?
