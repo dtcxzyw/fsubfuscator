@@ -88,7 +88,7 @@ add:                                    # @add
         ret
 ```
 
-After:
+After (with `-mcpu=skylake`):
 ```
 .LCPI0_0:
         .long   1                               # 0x1
@@ -97,95 +97,79 @@ After:
         .long   8                               # 0x8
 .LCPI0_1:
         .long   0x80000000                      # float -0
-        .long   0x80000000                      # float -0
-        .long   0x80000000                      # float -0
-        .long   0x80000000                      # float -0
 add:                                    # @add
-        movd    xmm0, edi
-        pshufd  xmm6, xmm0, 0                   # xmm6 = xmm0[0,0,0,0]
-        movdqa  xmm1, xmmword ptr [rip + .LCPI0_0] # xmm1 = [1,2,4,8]
-        pand    xmm6, xmm1
-        pxor    xmm2, xmm2
-        pcmpeqd xmm6, xmm2
-        movdqa  xmm0, xmmword ptr [rip + .LCPI0_1] # xmm0 = [-0.0E+0,-0.0E+0,-0.0E+0,-0.0E+0]
-        pand    xmm6, xmm0
-        movd    xmm3, esi
-        pshufd  xmm7, xmm3, 0                   # xmm7 = xmm3[0,0,0,0]
-        pand    xmm7, xmm1
-        pcmpeqd xmm7, xmm2
-        pand    xmm7, xmm0
-        movdqa  xmm5, xmm7
-        subss   xmm5, xmm6
-        movaps  xmm1, xmm6
-        pshufd  xmm2, xmm6, 85                  # xmm2 = xmm6[1,1,1,1]
-        pshufd  xmm3, xmm6, 238                 # xmm3 = xmm6[2,3,2,3]
-        pshufd  xmm4, xmm6, 255                 # xmm4 = xmm6[3,3,3,3]
-        movdqa  xmm12, xmm6
-        pxor    xmm12, xmm0
-        subss   xmm1, xmm7
-        xorps   xmm1, xmm0
-        subss   xmm12, xmm7
-        pshufd  xmm8, xmm7, 85                  # xmm8 = xmm7[1,1,1,1]
-        movdqa  xmm10, xmm2
-        pxor    xmm10, xmm0
-        movdqa  xmm6, xmm8
-        subss   xmm6, xmm2
-        subss   xmm2, xmm8
-        xorps   xmm2, xmm0
-        subss   xmm2, xmm6
-        movaps  xmm6, xmm2
-        xorps   xmm6, xmm0
-        subss   xmm10, xmm8
-        pshufd  xmm9, xmm7, 238                 # xmm9 = xmm7[2,3,2,3]
-        movdqa  xmm11, xmm3
-        pxor    xmm11, xmm0
-        movdqa  xmm8, xmm9
-        subss   xmm8, xmm3
-        subss   xmm3, xmm9
-        xorps   xmm3, xmm0
-        subss   xmm3, xmm8
-        movaps  xmm8, xmm3
-        xorps   xmm8, xmm0
-        subss   xmm11, xmm9
-        pshufd  xmm7, xmm7, 255                 # xmm7 = xmm7[3,3,3,3]
-        movdqa  xmm9, xmm7
-        subss   xmm9, xmm4
-        subss   xmm4, xmm7
-        xorps   xmm4, xmm0
-        subss   xmm4, xmm9
-        subss   xmm1, xmm5
-        xorps   xmm7, xmm7
-        xorps   xmm9, xmm9
-        subss   xmm9, xmm1
-        xorps   xmm9, xmm0
-        subss   xmm9, xmm12
-        movaps  xmm5, xmm2
-        subss   xmm5, xmm9
-        xorps   xmm5, xmm0
-        subss   xmm6, xmm9
-        xorps   xmm6, xmm0
-        subss   xmm6, xmm10
-        movaps  xmm10, xmm3
-        subss   xmm10, xmm6
-        xorps   xmm10, xmm0
-        subss   xmm8, xmm6
-        xorps   xmm8, xmm0
-        subss   xmm8, xmm11
-        unpcklps        xmm6, xmm8                      # xmm6 = xmm6[0],xmm8[0],xmm6[1],xmm8[1]
-        addss   xmm7, xmm1
-        movlhps xmm5, xmm1                      # xmm5 = xmm5[0],xmm1[0]
-        unpcklps        xmm1, xmm9                      # xmm1 = xmm1[0],xmm9[0],xmm1[1],xmm9[1]
-        movlhps xmm1, xmm6                      # xmm1 = xmm1[0],xmm6[0]
-        unpcklps        xmm3, xmm4                      # xmm3 = xmm3[0],xmm4[0],xmm3[1],xmm4[1]
-        shufps  xmm2, xmm3, 64                  # xmm2 = xmm2[0,0],xmm3[0,1]
-        subps   xmm1, xmm2
-        movss   xmm1, xmm7                      # xmm1 = xmm7[0],xmm1[1,2,3]
-        subss   xmm4, xmm8
-        xorps   xmm4, xmm0
-        movlhps xmm4, xmm10                     # xmm4 = xmm4[0],xmm10[0]
-        shufps  xmm5, xmm4, 34                  # xmm5 = xmm5[2,0],xmm4[2,0]
-        subps   xmm5, xmm1
-        movmskps        eax, xmm5
+        vmovd   xmm0, edi
+        vpbroadcastd    xmm0, xmm0
+        vmovdqa xmm1, xmmword ptr [rip + .LCPI0_0] # xmm1 = [1,2,4,8]
+        vpand   xmm0, xmm0, xmm1
+        vpxor   xmm2, xmm2, xmm2
+        vpcmpeqd        xmm3, xmm0, xmm2
+        vpbroadcastd    xmm0, dword ptr [rip + .LCPI0_1] # xmm0 = [-0.0E+0,-0.0E+0,-0.0E+0,-0.0E+0]
+        vpand   xmm3, xmm3, xmm0
+        vmovd   xmm4, esi
+        vpbroadcastd    xmm4, xmm4
+        vpand   xmm1, xmm4, xmm1
+        vpcmpeqd        xmm1, xmm1, xmm2
+        vpand   xmm2, xmm1, xmm0
+        vpxor   xmm1, xmm3, xmm0
+        vsubss  xmm4, xmm2, xmm3
+        vsubss  xmm5, xmm3, xmm2
+        vxorps  xmm5, xmm5, xmm0
+        vsubss  xmm6, xmm1, xmm2
+        vshufps xmm1, xmm3, xmm3, 245           # xmm1 = xmm3[1,1,3,3]
+        vshufps xmm7, xmm2, xmm2, 245           # xmm7 = xmm2[1,1,3,3]
+        vxorps  xmm8, xmm1, xmm0
+        vsubss  xmm9, xmm7, xmm1
+        vsubss  xmm1, xmm1, xmm7
+        vxorps  xmm1, xmm1, xmm0
+        vsubss  xmm9, xmm1, xmm9
+        vbroadcastss    xmm1, xmm9
+        vxorps  xmm10, xmm1, xmm0
+        vsubss  xmm7, xmm8, xmm7
+        vshufps xmm8, xmm3, xmm3, 78            # xmm8 = xmm3[2,3,0,1]
+        vshufps xmm11, xmm2, xmm2, 78           # xmm11 = xmm2[2,3,0,1]
+        vxorps  xmm12, xmm8, xmm0
+        vsubss  xmm13, xmm11, xmm8
+        vsubss  xmm8, xmm8, xmm11
+        vxorps  xmm8, xmm8, xmm0
+        vsubss  xmm8, xmm8, xmm13
+        vxorps  xmm13, xmm8, xmm0
+        vsubss  xmm11, xmm12, xmm11
+        vshufps xmm3, xmm3, xmm3, 255           # xmm3 = xmm3[3,3,3,3]
+        vshufps xmm2, xmm2, xmm2, 255           # xmm2 = xmm2[3,3,3,3]
+        vsubss  xmm12, xmm2, xmm3
+        vsubss  xmm2, xmm3, xmm2
+        vxorps  xmm2, xmm2, xmm0
+        vsubss  xmm2, xmm2, xmm12
+        vsubss  xmm3, xmm5, xmm4
+        vxorps  xmm4, xmm4, xmm4
+        vsubss  xmm5, xmm4, xmm3
+        vxorps  xmm5, xmm5, xmm0
+        vsubss  xmm5, xmm5, xmm6
+        vsubss  xmm6, xmm9, xmm5
+        vxorps  xmm6, xmm6, xmm0
+        vsubss  xmm9, xmm10, xmm5
+        vxorps  xmm9, xmm9, xmm0
+        vsubss  xmm7, xmm9, xmm7
+        vsubss  xmm9, xmm8, xmm7
+        vxorps  xmm9, xmm9, xmm0
+        vsubss  xmm10, xmm13, xmm7
+        vxorps  xmm10, xmm10, xmm0
+        vsubss  xmm10, xmm10, xmm11
+        vshufps xmm5, xmm5, xmm7, 0             # xmm5 = xmm5[0,0],xmm7[0,0]
+        vinsertps       xmm5, xmm5, xmm10, 48   # xmm5 = xmm5[0,1,2],xmm10[0]
+        vinsertps       xmm1, xmm1, xmm8, 32    # xmm1 = xmm1[0,1],xmm8[0],xmm1[3]
+        vinsertps       xmm1, xmm1, xmm2, 48    # xmm1 = xmm1[0,1,2],xmm2[0]
+        vsubps  xmm1, xmm5, xmm1
+        vaddss  xmm4, xmm3, xmm4
+        vblendps        xmm1, xmm1, xmm4, 1             # xmm1 = xmm4[0],xmm1[1,2,3]
+        vsubss  xmm2, xmm2, xmm10
+        vxorps  xmm0, xmm2, xmm0
+        vunpcklps       xmm2, xmm3, xmm6        # xmm2 = xmm3[0],xmm6[0],xmm3[1],xmm6[1]
+        vmovlhps        xmm2, xmm2, xmm9                # xmm2 = xmm2[0],xmm9[0]
+        vinsertps       xmm0, xmm2, xmm0, 48    # xmm0 = xmm2[0,1,2],xmm0[0]
+        vsubps  xmm0, xmm0, xmm1
+        vmovmskps       eax, xmm0
         xor     eax, 15
         ret
 ```
