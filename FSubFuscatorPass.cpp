@@ -38,6 +38,7 @@
 #include <llvm/Support/ErrorHandling.h>
 #include <llvm/Transforms/InstCombine/InstCombine.h>
 #include <llvm/Transforms/Scalar/EarlyCSE.h>
+#include <llvm/Transforms/Scalar/InstSimplifyPass.h>
 #include <llvm/Transforms/Utils/BasicBlockUtils.h>
 #include <llvm/Transforms/Utils/Local.h>
 #include <algorithm>
@@ -68,11 +69,15 @@ class BitFuscatorImpl final : public InstVisitor<BitFuscatorImpl, Value *> {
   Value *convertToBit(Value *V) {
     if (auto It = CachedCastToBit.find(V); It != CachedCastToBit.end()) {
       auto *Block = Builder.GetInsertBlock();
-      for (auto *Res : It->second)
-        if ((!isa<Instruction>(Res) ||
-             DT.dominates(cast<Instruction>(Res), Block)))
+      for (auto *Res : It->second) {
+        if (!isa<Instruction>(Res))
           return Res;
+        auto *I = cast<Instruction>(Res);
+        if (I->getParent() == Block || DT.dominates(I, Block))
+          return Res;
+      }
     }
+
     assert(!V->getType()->isVectorTy());
     auto *VT = VectorType::get(Builder.getInt1Ty(),
                                V->getType()->getScalarSizeInBits(),
@@ -88,11 +93,16 @@ class BitFuscatorImpl final : public InstVisitor<BitFuscatorImpl, Value *> {
   Value *convertFromBit(Value *V, Type *DestTy) {
     if (auto It = CachedCastFromBit.find(V); It != CachedCastFromBit.end()) {
       auto *Block = Builder.GetInsertBlock();
-      for (auto *Res : It->second)
-        if (Res->getType() == DestTy &&
-            (!isa<Instruction>(Res) ||
-             DT.dominates(cast<Instruction>(Res), Block)))
+      for (auto *Res : It->second) {
+        if (Res->getType() != DestTy)
+          continue;
+
+        if (!isa<Instruction>(Res))
           return Res;
+        auto *I = cast<Instruction>(Res);
+        if (I->getParent() == Block || DT.dominates(I, Block))
+          return Res;
+      }
     }
 
     assert(V->getType()->isVectorTy() && !DestTy->isVectorTy());
@@ -233,7 +243,7 @@ class BitFuscatorImpl final : public InstVisitor<BitFuscatorImpl, Value *> {
 
     // Post
     Builder.SetInsertPoint(Post, Post->getFirstInsertionPt());
-    DTU.applyUpdatesPermissive(DTUpdates);
+    DTU.applyUpdates(DTUpdates);
     return convertFromBit(Res, V1->getType());
   }
 
@@ -364,7 +374,7 @@ class BitFuscatorImpl final : public InstVisitor<BitFuscatorImpl, Value *> {
     PhiRes->addIncoming(NextPhiRes, SubstractBody);
     // Post
     Builder.SetInsertPoint(Post, Post->getFirstInsertionPt());
-    DTU.applyUpdatesPermissive(DTUpdates);
+    DTU.applyUpdates(DTUpdates);
 
     auto *Quotient = convertFromBit(NextPhiRes, V1->getType());
     auto *Remainder = convertFromBit(NextPhiA, V1->getType());
@@ -491,7 +501,7 @@ public:
       std::iota(Mask.begin(), Mask.end(), 0);
       FinalRes = Builder.CreateShuffleVector(FinalRes, Mask);
     }
-    DTU.applyUpdatesPermissive(DTUpdates);
+    DTU.applyUpdates(DTUpdates);
     return convertFromBit(FinalRes, DestTy);
   }
   Value *getReducedShAmt(Value *ShAmt) {
@@ -764,7 +774,7 @@ public:
       : F(F), Builder(F.getContext()),
         BitRep(BitRepBase::createBitRep(Builder, getRepMethod())),
         DT(FAM.getResult<DominatorTreeAnalysis>(F)),
-        DTU(DT, DomTreeUpdater::UpdateStrategy::Lazy) {}
+        DTU(DT, DomTreeUpdater::UpdateStrategy::Eager) {}
 
   bool run() {
     bool Changed = false;
@@ -817,6 +827,10 @@ public:
 };
 
 void addFSubFuscatorPasses(FunctionPassManager &PM, OptimizationLevel Level) {
+  if (Level != OptimizationLevel::O0) {
+    PM.addPass(InstSimplifyPass());
+    PM.addPass(InstCombinePass());
+  }
   PM.addPass(FSubFuscator());
   if (Level != OptimizationLevel::O0) {
     // post clean up

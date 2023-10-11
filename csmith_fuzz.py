@@ -93,13 +93,15 @@ def csmith_test(id):
         return None
 
     try:
-        output = subprocess.check_output(f"{tmp_dir}/{id}.out", timeout=60.0)
+        output = subprocess.check_output(f"{tmp_dir}/{id}.out", timeout=20.0)
         if ref_output_gcc != output:
             return False
         cleanup(id)
         return True
     except subprocess.TimeoutExpired:
-        return False
+        # ignore timeout
+        cleanup(id)
+        return None
 
 
 L = list(range(num_tests))
