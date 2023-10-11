@@ -180,5 +180,7 @@ add:                                    # @add
 
 + It doesn't support vectorized code yet. Currently it rewrites IR before vectorization.
 
++ It doesn't work with `-ffast-math` since clang will ignore the sign of floating point zeros. See also https://clang.llvm.org/docs/UsersManual.html#controlling-floating-point-behavior.
+
 ## License
 This repository is licensed under the Apache License 2.0. See [LICENSE](LICENSE) for details.
