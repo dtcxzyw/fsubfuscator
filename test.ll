@@ -221,6 +221,11 @@ define i4 @umax(i4 %a, i4 %b) {
   ret i4 %c
 }
 
+define i1 @icmp_eq_ptr_nofold(ptr %a, ptr %b) {
+  %c = icmp eq ptr %a, %b
+  ret i1 %c
+}
+
 declare {i4, i1} @llvm.uadd.with.overflow.i4(i4 %a, i4 %b)
 declare {i4, i1} @llvm.usub.with.overflow.i4(i4 %a, i4 %b)
 declare {i4, i1} @llvm.sadd.with.overflow.i4(i4 %a, i4 %b)

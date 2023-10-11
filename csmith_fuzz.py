@@ -38,7 +38,7 @@ if os.path.exists(tmp_dir):
     shutil.rmtree(tmp_dir)
 os.makedirs(tmp_dir)
 
-csmith_args = "--no-volatiles --no-bitfields --max-funcs 1 --max-block-depth 1 --max-block-size 1 --max-expr-complexity 1"
+csmith_args = "--no-volatiles --no-bitfields --max-funcs 3"
 
 
 def try_remove(filename):

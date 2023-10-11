@@ -34,6 +34,7 @@
 #include <llvm/IR/Intrinsics.h>
 #include <llvm/IR/PassManager.h>
 #include <llvm/IR/Value.h>
+#include <llvm/IR/Verifier.h>
 #include <llvm/Support/ErrorHandling.h>
 #include <llvm/Transforms/InstCombine/InstCombine.h>
 #include <llvm/Transforms/Scalar/EarlyCSE.h>
@@ -165,7 +166,7 @@ class BitFuscatorImpl final : public InstVisitor<BitFuscatorImpl, Value *> {
     VectorType *VT = dyn_cast<VectorType>(Bits->getType());
     unsigned BitWidth = VT->getElementCount().getFixedValue();
     SmallVector<int, 64> Mask(BitWidth);
-    std::iota(Mask.begin(), Mask.begin(), 1);
+    std::iota(Mask.begin(), Mask.begin() + BitWidth - 1, 1);
     Mask.back() = BitWidth - 1;
     return Builder.CreateShuffleVector(Bits, Mask);
   }
@@ -297,28 +298,27 @@ class BitFuscatorImpl final : public InstVisitor<BitFuscatorImpl, Value *> {
     Builder.CreateUnreachable();
     // ShiftHeader
     Builder.SetInsertPoint(ShiftHeader);
-    // a u<= b || b s< 0
+    // b u< a && b s> 0
     auto EvalCondExpr = [&](Value *A, Value *B) {
       auto [Res, Carry] =
-          addWithOverflowBits(A, B,
+          addWithOverflowBits(B, A,
                               /*Sub*/ true, /*Unsigned*/ true, Bits);
-      auto *Cond1 =
-          Builder.CreateOr(BitRep->convertFromBit(Carry), equalZero(Res));
-      auto *Cond2 = lessThanZero(B);
-      auto *Cond = Builder.CreateOr(Cond1, Cond2);
+      auto *Cond1 = BitRep->convertFromBit(Carry);
+      auto *Cond2 = Builder.CreateNot(lessThanZero(B));
+      auto *Cond = Builder.CreateAnd(Cond1, Cond2);
       return Cond;
     };
-    Builder.CreateCondBr(EvalCondExpr(Op1, Op2), SubstractHeader, ShiftBody);
+    Builder.CreateCondBr(EvalCondExpr(Op1, Op2), ShiftBody, SubstractHeader);
     DTUpdates.push_back({DominatorTree::Insert, ShiftHeader, SubstractHeader});
     DTUpdates.push_back({DominatorTree::Insert, ShiftHeader, ShiftBody});
     // ShiftBody
     Builder.SetInsertPoint(ShiftBody);
     auto *B = Builder.CreatePHI(Op1->getType(), 2);
     auto *Bit = Builder.CreatePHI(Op1->getType(), 2);
-    auto *NextB = lshr1(B);
-    auto *NextBit = lshr1(Bit);
-    // a u<= NextB || NextB s< 0
-    Builder.CreateCondBr(EvalCondExpr(Op1, NextB), SubstractHeader, ShiftBody);
+    auto *NextB = shl1(B);
+    auto *NextBit = shl1(Bit);
+    // NextB u< A && NextB s> 0
+    Builder.CreateCondBr(EvalCondExpr(Op1, NextB), ShiftBody, SubstractHeader);
     DTUpdates.push_back({DominatorTree::Insert, ShiftBody, SubstractHeader});
     DTUpdates.push_back({DominatorTree::Insert, ShiftBody, ShiftBody});
     B->addIncoming(Op2, ShiftHeader);
@@ -351,7 +351,7 @@ class BitFuscatorImpl final : public InstVisitor<BitFuscatorImpl, Value *> {
         Builder.CreateSelect(Cond, PhiRes, BitRep->bitOr(PhiRes, PhiBit));
     auto *NextPhiBit = lshr1(PhiBit);
     auto *NextPhiB = lshr1(PhiB);
-    Builder.CreateCondBr(equalZero(NextPhiA), Post, SubstractBody);
+    Builder.CreateCondBr(equalZero(NextPhiBit), Post, SubstractBody);
     DTUpdates.push_back({DominatorTree::Insert, SubstractBody, Post});
     DTUpdates.push_back({DominatorTree::Insert, SubstractBody, SubstractBody});
     PhiA->addIncoming(Op1, SubstractHeader);
@@ -574,7 +574,7 @@ public:
     return visitCast(I, /*NullOp1*/ false, /*Freeze*/ true, Mask);
   }
   Value *visitICmp(ICmpInst &I) {
-    if (!I.getType()->isIntegerTy())
+    if (!I.getOperand(0)->getType()->isIntegerTy())
       return nullptr;
 
     auto *Op0 = I.getOperand(0);
@@ -796,6 +796,9 @@ public:
       else
         break;
     }
+
+    if (verifyFunction(F, &errs()))
+      report_fatal_error("BitFuscatorImpl: Function verification failed");
 
     return Changed;
   }
