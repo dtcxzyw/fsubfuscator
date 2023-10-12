@@ -21,6 +21,7 @@ enum BitRepMethod {
   FSub,
   Int1,
   InvInt1,
+  Mod3,
 
   DefaultBitRep = FSub,
 };

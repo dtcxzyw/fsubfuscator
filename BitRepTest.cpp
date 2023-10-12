@@ -98,6 +98,8 @@ TEST_F(BinRepTest, MethodInvInt1) {
 
 TEST_F(BinRepTest, MethodFSub) { testBitRep(Builder, BitRepMethod::FSub); }
 
+TEST_F(BinRepTest, MethodMod3) { testBitRep(Builder, BitRepMethod::Mod3); }
+
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   InitLLVM Init{argc, argv};

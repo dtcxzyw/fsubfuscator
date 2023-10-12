@@ -54,6 +54,7 @@ if (${FSUBFUSCATOR_ENABLE_TESTS})
 
   add_test(NAME test_standalone_int1 COMMAND sh -c "${FSUBFUSCATOR_EXECUTABLE} -S -bitrep=Int1 test.ll -o ${CMAKE_BINARY_DIR}/test_int1.ll && ${ALIVE2} test.ll ${CMAKE_BINARY_DIR}/test_int1.ll" WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_standalone_invint1 COMMAND sh -c "${FSUBFUSCATOR_EXECUTABLE} -S -bitrep=InvInt1 test.ll -o ${CMAKE_BINARY_DIR}/test_invint1.ll && ${ALIVE2} test.ll ${CMAKE_BINARY_DIR}/test_invint1.ll" WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_standalone_mod3 COMMAND sh -c "${FSUBFUSCATOR_EXECUTABLE} -S -bitrep=Mod3 test.ll -o ${CMAKE_BINARY_DIR}/test_mod3.ll" WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_standalone_fsub COMMAND ${FSUBFUSCATOR_EXECUTABLE} -S -bitrep=FSub test.ll -o ${CMAKE_BINARY_DIR}/test_fsub.ll WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_opt COMMAND ${OPT} -O3 -S -load-pass-plugin ${FSUBFUSCATOR_PLUGIN} test.ll -o ${CMAKE_BINARY_DIR}/test_opt.ll WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_clang COMMAND ${CLANG} -O3 -c -emit-llvm -S -fpass-plugin=${FSUBFUSCATOR_PLUGIN} test.c -o ${CMAKE_BINARY_DIR}/test_clang.ll WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})

@@ -54,7 +54,8 @@ static cl::opt<BitRepMethod> RepMethod(
     "bitrep", cl::desc("Bit representation to use"),
     cl::values(clEnumVal(FSub, "Default: Use fsub and f32. (T=0.0, F=-0.0)"),
                clEnumVal(Int1, "Use bitwise and i1. (T=true, F=false)"),
-               clEnumVal(InvInt1, "Use bitwise and i1. (T=false, F=true)")),
+               clEnumVal(InvInt1, "Use bitwise and i1. (T=false, F=true)"),
+               clEnumVal(Mod3, "Use mod and i32. (T=2, F=1)")),
     cl::init(DefaultBitRep), cl::cat(FsubFuscatorCategory));
 
 class BitFuscatorImpl final : public InstVisitor<BitFuscatorImpl, Value *> {
@@ -765,6 +766,7 @@ public:
           .Case("Int1", BitRepMethod::Int1)
           .Case("InvInt1", BitRepMethod::InvInt1)
           .Case("FSub", BitRepMethod::FSub)
+          .Case("Mod3", BitRepMethod::Mod3)
           .Default(BitRepMethod::DefaultBitRep);
     }
     return RepMethod;

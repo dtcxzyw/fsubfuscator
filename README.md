@@ -57,9 +57,9 @@ configure && make ...
 # Use wrapper in your project with CMake
 cmake -DCMAKE_C_COMPILER=<path to build>/fsubcc -DCMAKE_CXX_COMPILER=<path to build>/fsub++ ...
 # To use other bit representation instead of fsub
-./fsubfuscator -bitrep=<FSub|Int1|InvInt1> test.ll -S -o out.ll
+./fsubfuscator -bitrep=<FSub|Int1|InvInt1|Mod3> test.ll -S -o out.ll
 # or use the environment variable (highest priority) to pass the parameter to clang
-export FSUBFUSCATOR_BITREP_OVERRIDE=<FSub|Int1|InvInt1>
+export FSUBFUSCATOR_BITREP_OVERRIDE=<FSub|Int1|InvInt1|Mod3>
 ./fsubcc ...
 ```
 

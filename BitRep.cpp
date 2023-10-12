@@ -106,6 +106,48 @@ struct InvInt1BitRep final : public BitRepBase {
   }
 };
 
+struct Mod3BitRep final : public BitRepBase {
+  explicit Mod3BitRep(IRBuilder<> &Builder) : BitRepBase(Builder) {}
+
+  Type *getBitTy() override { return Builder.getInt32Ty(); }
+  Constant *getBit0() override { return Builder.getInt32(1); }
+  Constant *getBit1() override { return Builder.getInt32(2); }
+
+  // handle vector of i1
+  Value *convertToBit(Value *V) override {
+    auto *VT = V->getType()->getWithNewType(getBitTy());
+    return Builder.CreateSelect(V, ConstantInt::get(VT, 2),
+                                ConstantInt::get(VT, 1));
+  }
+  // handle vector of bitTy
+  Value *convertFromBit(Value *V) override {
+    return Builder.CreateICmpSGT(V, ConstantInt::get(V->getType(), 1));
+  }
+
+  Value *bitNot(Value *V) override {
+    return Builder.CreateURem(Builder.CreateShl(V, 1),
+                              ConstantInt::get(V->getType(), 3));
+  }
+  Value *bitXor(Value *V1, Value *V2) override {
+    return Builder.CreateURem(Builder.CreateMul(V1, V2),
+                              ConstantInt::get(V1->getType(), 3));
+  }
+  Value *bitOr(Value *V1, Value *V2) override {
+    auto *One = ConstantInt::get(V1->getType(), 1);
+    return Builder.CreateSub(
+        ConstantInt::get(V1->getType(), 2),
+        Builder.CreateURem(Builder.CreateMul(Builder.CreateAdd(V1, One),
+                                             Builder.CreateAdd(V2, One)),
+                           ConstantInt::get(V1->getType(), 3)));
+  }
+  Value *bitAnd(Value *V1, Value *V2) override {
+    auto *One = ConstantInt::get(V1->getType(), 1);
+    return Builder.CreateAdd(Builder.CreateMul(Builder.CreateSub(V1, One),
+                                               Builder.CreateSub(V2, One)),
+                             One);
+  }
+};
+
 std::unique_ptr<BitRepBase> BitRepBase::createBitRep(IRBuilder<> &Builder,
                                                      BitRepMethod Method) {
   switch (Method) {
@@ -115,6 +157,8 @@ std::unique_ptr<BitRepBase> BitRepBase::createBitRep(IRBuilder<> &Builder,
     return std::make_unique<Int1BitRep>(Builder);
   case InvInt1:
     return std::make_unique<InvInt1BitRep>(Builder);
+  case Mod3:
+    return std::make_unique<Mod3BitRep>(Builder);
   default:
     llvm_unreachable("Unexpected bit representation method");
   }
