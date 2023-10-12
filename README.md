@@ -10,6 +10,33 @@ The FSubfuscator rewrites most of integer arithmetic operations into a bunch of 
 
 It supports C/C++/Rust and other programming languages that use LLVM as the backend.
 
+## CTF Challenge
+To confuse some automatic exploit generation tools, I added a new bit representation called `Mod3`. I also designed a CTF challenge to demonstrate the effectiveness of this obfuscator. Here is the source code of the challenge (magic numbers are omitted):
+```
+# Compiled with:
+# FSUBFUSCATOR_BITREP_OVERRIDE=Mod3 ./fsubcc -O3 test.c
+#include <stdio.h>
+int main() {
+  int a, b, c;
+  printf("Please input a, b, c:\n");
+  scanf("%d%d%d", &a, &b, &c);
+  if (((b + ?) & (c + ?)) == (a ^ ?)) {
+    if (a + c == ?) {
+      printf("%d %d %d\n", a, b, c);
+      puts("Win!");
+    }
+  }
+  return 0;
+}
+```
+
+Here is [x86-64 Executable](https://github.com/dtcxzyw/fsubfuscator/files/12885861/a.out.tar.gz). Please file an issue to describe your approach if you get a solution.
+```
+echo "bbde02bd001bb27c4175347851b8a953c918de88d8a59f5115f2ec687f2bdb3e a.out.tar.gz" | sha256sum -c
+```
+
+Good luck and have fun :)
+
 ## Building
 ### Prerequisites
 
