@@ -456,7 +456,8 @@ public:
     return udivmod(V0, V1).second;
   }
   template <typename ShiftOnce>
-  Value *visitShift(Type *DestTy, Value *Src, Value *ShAmtVal, ShiftOnce Func) {
+  Value *visitShift(Type *DestTy, Value *Src, Value *ShAmtVal, ShiftOnce Func,
+                    bool ExtractHigh = false) {
     auto *ShAmt = Builder.CreateFreeze(ShAmtVal);
 
     auto *Block = Builder.GetInsertBlock();
@@ -495,11 +496,12 @@ public:
     // Post
     Builder.SetInsertPoint(Post, Post->getFirstInsertionPt());
     Value *FinalRes = Res;
+    const auto DestBits = DestTy->getScalarSizeInBits();
     // Trunc result for funnel shifts
-    if (DestTy->getScalarSizeInBits() !=
+    if (DestBits !=
         cast<VectorType>(Res->getType())->getElementCount().getFixedValue()) {
-      SmallVector<int, 64> Mask(DestTy->getScalarSizeInBits());
-      std::iota(Mask.begin(), Mask.end(), 0);
+      SmallVector<int, 64> Mask(DestBits);
+      std::iota(Mask.begin(), Mask.end(), ExtractHigh ? DestBits : 0);
       FinalRes = Builder.CreateShuffleVector(FinalRes, Mask);
     }
     DTU.applyUpdates(DTUpdates);
@@ -517,9 +519,9 @@ public:
                       [&](Value *V) { return shl1(V); });
   }
   Value *visitAShr(BinaryOperator &I) {
-    return visitShift(I.getType(), convertToBit(I.getOperand(0)),
-                      getReducedShAmt(I.getOperand(1)),
-                      [&](Value *V) { return ashr1(V); });
+    return visitShift(
+        I.getType(), convertToBit(Builder.CreateFreeze(I.getOperand(0))),
+        getReducedShAmt(I.getOperand(1)), [&](Value *V) { return ashr1(V); });
   }
   Value *visitLShr(BinaryOperator &I) {
     return visitShift(I.getType(), convertToBit(I.getOperand(0)),
@@ -685,24 +687,23 @@ public:
 
       auto *BitsA = convertToBit(Op0);
       auto *BitsB = convertToBit(Op1);
-      if (I.getIntrinsicID() == Intrinsic::fshr)
-        std::swap(BitsA, BitsB);
+      std::swap(BitsA, BitsB);
       auto BitWidth = I.getOperand(0)->getType()->getScalarSizeInBits();
       SmallVector<int, 128> Mask(BitWidth * 2);
       std::iota(Mask.begin(), Mask.end(), 0);
       auto *Combined = Builder.CreateShuffleVector(BitsA, BitsB, Mask);
+      auto *Shamt = I.getOperand(2);
       return visitShift(
           I.getType(), Combined,
           Builder.CreateURem(
-              I.getOperand(2),
-              ConstantInt::get(
-                  I.getOperand(2)->getType(),
-                  I.getOperand(2)->getType()->getScalarSizeInBits())),
+              Shamt, ConstantInt::get(Shamt->getType(),
+                                      Shamt->getType()->getScalarSizeInBits())),
           [&](Value *V) {
             if (I.getIntrinsicID() == Intrinsic::fshl)
               return shl1(V);
             return lshr1(V);
-          });
+          },
+          /*extractHigh*/ I.getIntrinsicID() == Intrinsic::fshl);
     }
     case Intrinsic::abs: {
       auto *Op0 = I.getOperand(0);
