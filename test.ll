@@ -225,17 +225,3 @@ define i1 @icmp_eq_ptr_nofold(ptr %a, ptr %b) {
   %c = icmp eq ptr %a, %b
   ret i1 %c
 }
-
-declare {i4, i1} @llvm.uadd.with.overflow.i4(i4 %a, i4 %b)
-declare {i4, i1} @llvm.usub.with.overflow.i4(i4 %a, i4 %b)
-declare {i4, i1} @llvm.sadd.with.overflow.i4(i4 %a, i4 %b)
-declare {i4, i1} @llvm.ssub.with.overflow.i4(i4 %a, i4 %b)
-declare i4 @llvm.ctpop.i4(i4 %a)
-declare i4 @llvm.bitreverse.i4(i4 %a)
-declare i4 @llvm.abs.i4(i4 %a, i1 %is_int_min_poison)
-declare i4 @llvm.fshl.i4(i4 %a, i4 %b, i4 %c)
-declare i4 @llvm.fshr.i4(i4 %a, i4 %b, i4 %c)
-declare i4 @llvm.smin.i4(i4 %a, i4 %b)
-declare i4 @llvm.smax.i4(i4 %a, i4 %b)
-declare i4 @llvm.umin.i4(i4 %a, i4 %b)
-declare i4 @llvm.umax.i4(i4 %a, i4 %b)
