@@ -59,18 +59,18 @@ def csmith_test(id):
         return None
 
     ret = os.system(
-        f'{reference_compiler_gcc} -I/usr/include/csmith -w -O3 -DNDEBUG {tmp_dir}/{id}.c -o {tmp_dir}/{id}.out_gcc')
+        f'{reference_compiler_gcc} -I/usr/include/csmith -w -Wno-c++11-narrowing -O3 -DNDEBUG {tmp_dir}/{id}.c -o {tmp_dir}/{id}.out_gcc')
     if ret != 0:
         cleanup(id)
         return None
     ret = os.system(
-        f'{reference_compiler_clang} -I/usr/include/csmith -w -O3 -DNDEBUG {tmp_dir}/{id}.c -o {tmp_dir}/{id}.out_clang')
+        f'{reference_compiler_clang} -I/usr/include/csmith -w -Wno-c++11-narrowing -O3 -DNDEBUG {tmp_dir}/{id}.c -o {tmp_dir}/{id}.out_clang')
     if ret != 0:
         cleanup(id)
         return None
 
     ret = os.system(
-        f'{compiler} -I/usr/include/csmith -w -O3 -fno-fast-math -fno-unsafe-math-optimizations -DNDEBUG {tmp_dir}/{id}.c -o {tmp_dir}/{id}.out 2>/dev/null')
+        f'{compiler} -I/usr/include/csmith -w -Wno-c++11-narrowing -O3 -fno-fast-math -fno-unsafe-math-optimizations -DNDEBUG {tmp_dir}/{id}.c -o {tmp_dir}/{id}.out')
     if ret != 0:
         return False
 

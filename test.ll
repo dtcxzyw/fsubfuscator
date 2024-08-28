@@ -225,3 +225,33 @@ define i1 @icmp_eq_ptr_nofold(ptr %a, ptr %b) {
   %c = icmp eq ptr %a, %b
   ret i1 %c
 }
+
+define i5 @scmp(i4 %a, i4 %b) {
+  %res = call i5 @llvm.scmp(i4 %a, i4 %b)
+  ret i5 %res
+}
+
+define i5 @ucmp(i4 %a, i4 %b) {
+  %res = call i5 @llvm.ucmp(i4 %a, i4 %b)
+  ret i5 %res
+}
+
+define i4 @sadd_sat(i4 %a, i4 %b) {
+  %res = call i4 @llvm.sadd.sat(i4 %a, i4 %b)
+  ret i4 %res
+}
+
+define i4 @ssub_sat(i4 %a, i4 %b) {
+  %res = call i4 @llvm.ssub.sat(i4 %a, i4 %b)
+  ret i4 %res
+}
+
+define i4 @uadd_sat(i4 %a, i4 %b) {
+  %res = call i4 @llvm.uadd.sat(i4 %a, i4 %b)
+  ret i4 %res
+}
+
+define i4 @usub_sat(i4 %a, i4 %b) {
+  %res = call i4 @llvm.usub.sat(i4 %a, i4 %b)
+  ret i4 %res
+}

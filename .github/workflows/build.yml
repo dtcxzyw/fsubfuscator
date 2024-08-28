@@ -46,3 +46,13 @@ jobs:
     - name: Run Tests
       run: ctest
       working-directory: build
+
+    - name: Checkout libpng
+      uses: actions/checkout@v4
+      with:
+        repository: pnggroup/libpng
+        path: libpng
+
+    - name: Test libpng
+      run: ${{github.workspace}}/.github/scripts/build-libpng.sh
+      working-directory: libpng

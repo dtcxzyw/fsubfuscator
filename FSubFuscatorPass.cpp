@@ -82,9 +82,7 @@ class BitFuscatorImpl final : public InstVisitor<BitFuscatorImpl, Value *> {
     assert(!V->getType()->isVectorTy());
     auto *VT = VectorType::get(Builder.getInt1Ty(),
                                V->getType()->getScalarSizeInBits(),
-                               /*Scalable*/ false);
-    if (F.getParent()->getDataLayout().isBigEndian())
-      V = Builder.CreateUnaryIntrinsic(Intrinsic::bswap, V);
+                               /*Scalable=*/false);
     auto *Bits = Builder.CreateBitCast(V, VT);
     auto *Res = BitRep->convertToBit(Bits);
     CachedCastToBit[V].push_back(Res);
@@ -226,10 +224,10 @@ class BitFuscatorImpl final : public InstVisitor<BitFuscatorImpl, Value *> {
         Builder.CreateExtractElement(B, Builder.getInt32(0)));
     auto *Add = Builder.CreateSelect(IsOdd, A, Zero);
     auto *Sum =
-        addWithOverflowBits(Res, Add, /*Sub*/ false, /*Unsigned*/ true, Bits)
+        addWithOverflowBits(Res, Add, /*Sub=*/false, /*Unsigned=*/true, Bits)
             .first;
     auto *NextA =
-        addWithOverflowBits(A, A, /*Sub*/ false, /*Unsigned*/ true, Bits).first;
+        addWithOverflowBits(A, A, /*Sub=*/false, /*Unsigned=*/true, Bits).first;
     auto *NextB = lshr1(B);
     Builder.CreateBr(Header);
     DTUpdates.push_back({DominatorTree::Insert, Body, Header});
@@ -313,7 +311,7 @@ class BitFuscatorImpl final : public InstVisitor<BitFuscatorImpl, Value *> {
     auto EvalCondExpr = [&](Value *A, Value *B) {
       auto [Res, Carry] =
           addWithOverflowBits(B, A,
-                              /*Sub*/ true, /*Unsigned*/ true, Bits);
+                              /*Sub=*/true, /*Unsigned=*/true, Bits);
       auto *Cond1 = BitRep->convertFromBit(Carry);
       auto *Cond2 = Builder.CreateNot(lessThanZero(B));
       auto *Cond = Builder.CreateAnd(Cond1, Cond2);
@@ -355,7 +353,7 @@ class BitFuscatorImpl final : public InstVisitor<BitFuscatorImpl, Value *> {
     auto *PhiRes = Builder.CreatePHI(Op1->getType(), 2);
     // a u< b
     auto [Sub, Carry] =
-        addWithOverflowBits(PhiA, PhiB, /*Sub*/ true, /*Unsigned*/ true, Bits);
+        addWithOverflowBits(PhiA, PhiB, /*Sub=*/true, /*Unsigned=*/true, Bits);
     auto *Cond = BitRep->convertFromBit(Carry);
     auto *NextPhiA = Builder.CreateSelect(Cond, PhiA, Sub);
     auto *NextPhiRes =
@@ -423,13 +421,13 @@ public:
   // rewrites
   Value *visitInstruction(Instruction &I) { return nullptr; }
   Value *visitAdd(BinaryOperator &I) {
-    return addWithOverflow(I.getOperand(0), I.getOperand(1), /*Sub*/ false,
-                           /*Unsigned*/ true)
+    return addWithOverflow(I.getOperand(0), I.getOperand(1), /*Sub=*/false,
+                           /*Unsigned=*/true)
         .first;
   }
   Value *visitSub(BinaryOperator &I) {
-    return addWithOverflow(I.getOperand(0), I.getOperand(1), /*Sub*/ true,
-                           /*Unsigned*/ true)
+    return addWithOverflow(I.getOperand(0), I.getOperand(1), /*Sub=*/true,
+                           /*Unsigned=*/true)
         .first;
   }
   Value *visitMul(BinaryOperator &I) {
@@ -568,7 +566,7 @@ public:
     auto DestBits = I.getType()->getScalarSizeInBits();
     SmallVector<int, 64> Mask(DestBits);
     std::iota(Mask.begin(), Mask.end(), 0);
-    return visitCast(I, /*NullOp1*/ false, /*Freeze*/ false, Mask);
+    return visitCast(I, /*NullOp1=*/false, /*Freeze=*/false, Mask);
   }
   Value *visitZExt(ZExtInst &I) {
     auto DestBits = I.getType()->getScalarSizeInBits();
@@ -576,7 +574,7 @@ public:
     SmallVector<int, 64> Mask(DestBits);
     std::iota(Mask.begin(), Mask.begin() + SrcBits, 0);
     std::fill(Mask.begin() + SrcBits, Mask.end(), SrcBits);
-    return visitCast(I, /*NullOp1*/ true, /*Freeze*/ false, Mask);
+    return visitCast(I, /*NullOp1=*/true, /*Freeze=*/false, Mask);
   }
   Value *visitSExt(SExtInst &I) {
     auto DestBits = I.getType()->getScalarSizeInBits();
@@ -584,7 +582,7 @@ public:
     SmallVector<int, 64> Mask(DestBits);
     std::iota(Mask.begin(), Mask.begin() + SrcBits, 0);
     std::fill(Mask.begin() + SrcBits, Mask.end(), SrcBits - 1);
-    return visitCast(I, /*NullOp1*/ false, /*Freeze*/ true, Mask);
+    return visitCast(I, /*NullOp1=*/false, /*Freeze=*/true, Mask);
   }
   Value *visitICmp(ICmpInst &I) {
     if (!I.getOperand(0)->getType()->isIntegerTy())
@@ -605,7 +603,7 @@ public:
 
     auto [Res, Carry] = addWithOverflow(
         Op0, Op1,
-        /*Sub*/ true, /*Unsigned*/ I.isEquality() || I.isUnsigned());
+        /*Sub=*/true, /*Unsigned=*/I.isEquality() || I.isUnsigned());
     // TODO: use Bits?
     switch (Pred) {
     case ICmpInst::ICMP_EQ:
@@ -642,33 +640,46 @@ public:
   Value *visitPhi(PHINode &Phi) {
     if (!Phi.getType()->isIntegerTy())
       return nullptr;
-    // TODO
-    return nullptr;
+    auto *NewPHI =
+        Builder.CreatePHI(VectorType::get(BitRep->getBitTy(),
+                                          Phi.getType()->getScalarSizeInBits(),
+                                          /*Scalable=*/false),
+                          Phi.getNumIncomingValues());
+    for (uint32_t I = 0; I != Phi.getNumIncomingValues(); ++I) {
+      auto *Incoming = Phi.getIncomingValue(I);
+      auto *IncomingBlock = Phi.getIncomingBlock(I);
+      IRBuilder<>::InsertPointGuard Guard(Builder);
+      Builder.SetInsertPoint(IncomingBlock->getTerminator());
+      auto *IncomingValue = convertToBit(Incoming);
+      NewPHI->addIncoming(IncomingValue, IncomingBlock);
+    }
+    return NewPHI;
   }
   Value *visitIntrinsicInst(IntrinsicInst &I) {
-    switch (I.getIntrinsicID()) {
+    Intrinsic::ID IID = I.getIntrinsicID();
+    switch (IID) {
     case Intrinsic::uadd_with_overflow:
     case Intrinsic::usub_with_overflow: {
       auto *LHS = Builder.CreateFreeze(I.getOperand(0));
       auto *RHS = Builder.CreateFreeze(I.getOperand(1));
-      auto [Res, Overflow] = addWithOverflow(LHS, RHS,
-                                             /*Sub*/ I.getIntrinsicID() ==
-                                                 Intrinsic::usub_with_overflow,
-                                             /*Unsigned*/ true);
+      auto [Res, Overflow] =
+          addWithOverflow(LHS, RHS,
+                          /*Sub=*/IID == Intrinsic::usub_with_overflow,
+                          /*Unsigned=*/true);
       auto *Pair =
-          Builder.CreateInsertValue(UndefValue::get(I.getType()), Res, {0});
+          Builder.CreateInsertValue(PoisonValue::get(I.getType()), Res, {0});
       return Builder.CreateInsertValue(Pair, Overflow, {1});
     }
     case Intrinsic::sadd_with_overflow:
     case Intrinsic::ssub_with_overflow: {
       auto *LHS = Builder.CreateFreeze(I.getOperand(0));
       auto *RHS = Builder.CreateFreeze(I.getOperand(1));
-      auto [Res, Overflow] = addWithOverflow(LHS, RHS,
-                                             /*Sub*/ I.getIntrinsicID() ==
-                                                 Intrinsic::ssub_with_overflow,
-                                             /*Unsigned*/ false);
+      auto [Res, Overflow] =
+          addWithOverflow(LHS, RHS,
+                          /*Sub=*/IID == Intrinsic::ssub_with_overflow,
+                          /*Unsigned=*/false);
       auto *Pair =
-          Builder.CreateInsertValue(UndefValue::get(I.getType()), Res, {0});
+          Builder.CreateInsertValue(PoisonValue::get(I.getType()), Res, {0});
       return Builder.CreateInsertValue(Pair, Overflow, {1});
     }
     case Intrinsic::ctpop: {
@@ -703,7 +714,7 @@ public:
               return shl1(V);
             return lshr1(V);
           },
-          /*extractHigh*/ I.getIntrinsicID() == Intrinsic::fshl);
+          /*ExtractHigh=*/I.getIntrinsicID() == Intrinsic::fshl);
     }
     case Intrinsic::abs: {
       auto *Op0 = I.getOperand(0);
@@ -717,8 +728,8 @@ public:
           getConstantWithType(Bits->getType(), BitRep->getBit1()),
           getConstantWithType(Bits->getType(), BitRep->getBit0()));
       // abs(x) = (x + sign) ^ sign
-      auto *Sum = addWithOverflowBits(Bits, Mask, /*Sub*/ false,
-                                      /*Unsigned*/ true, BitWidth)
+      auto *Sum = addWithOverflowBits(Bits, Mask, /*Sub=*/false,
+                                      /*Unsigned=*/true, BitWidth)
                       .first;
       auto *Res = BitRep->bitXor(Sum, Mask);
       return convertFromBit(Res, I.getType());
@@ -734,12 +745,12 @@ public:
     case Intrinsic::umax: {
       auto *Op0 = Builder.CreateFreeze(I.getOperand(0));
       auto *Op1 = Builder.CreateFreeze(I.getOperand(1));
-      auto Signed = MinMaxIntrinsic::isSigned(I.getIntrinsicID());
+      auto Signed = MinMaxIntrinsic::isSigned(IID);
       auto Bits = Op0->getType()->getScalarSizeInBits();
       auto *LHS = convertToBit(Op0);
       auto *RHS = convertToBit(Op1);
       auto [Res, Carry] =
-          addWithOverflowBits(LHS, RHS, /*Sub*/ true, !Signed, Bits);
+          addWithOverflowBits(LHS, RHS, /*Sub=*/true, !Signed, Bits);
       Value *LessThan;
       if (Signed)
         LessThan =
@@ -747,12 +758,55 @@ public:
       else
         LessThan = BitRep->convertFromBit(Carry);
       Value *ResVal = nullptr;
-      if (I.getIntrinsicID() == Intrinsic::smin ||
-          I.getIntrinsicID() == Intrinsic::umin)
+      if (IID == Intrinsic::smin || IID == Intrinsic::umin)
         ResVal = Builder.CreateSelect(LessThan, LHS, RHS);
       else
         ResVal = Builder.CreateSelect(LessThan, RHS, LHS);
       return convertFromBit(ResVal, I.getType());
+    }
+    case Intrinsic::sadd_sat:
+    case Intrinsic::ssub_sat:
+    case Intrinsic::uadd_sat:
+    case Intrinsic::usub_sat: {
+      bool IsSub = IID == Intrinsic::ssub_sat || IID == Intrinsic::usub_sat;
+      bool IsUnsigned =
+          IID == Intrinsic::uadd_sat || IID == Intrinsic::usub_sat;
+      auto *Op0 = Builder.CreateFreeze(I.getOperand(0));
+      auto *Op1 = Builder.CreateFreeze(I.getOperand(1));
+      auto [Res, Carry] =
+          addWithOverflow(Op0, Op1, /*Sub=*/IsSub, /*Unsigned=*/IsUnsigned);
+      auto Bits = Op0->getType()->getScalarSizeInBits();
+      APInt SatVal = IsSub ? (IsUnsigned ? APInt::getMinValue(Bits)
+                                         : APInt::getSignedMinValue(Bits))
+                           : (IsUnsigned ? APInt::getMaxValue(Bits)
+                                         : APInt::getSignedMaxValue(Bits));
+      return Builder.CreateSelect(Carry, Builder.getInt(SatVal), Res);
+    }
+    case Intrinsic::ucmp:
+    case Intrinsic::scmp: {
+      if (!I.getOperand(0)->getType()->isIntegerTy())
+        return nullptr;
+      auto *Op0 = Builder.CreateFreeze(I.getOperand(0));
+      auto *Op1 = Builder.CreateFreeze(I.getOperand(1));
+      auto [Res, Carry] = addWithOverflow(Op0, Op1, /*Sub=*/true,
+                                          /*Unsigned=*/IID == Intrinsic::ucmp);
+      // cmp = zext(x > y) - zext(x < y)
+      Value *GT = nullptr;
+      Value *LT = nullptr;
+      if (IID == Intrinsic::ucmp) {
+        GT = Builder.CreateAnd(Builder.CreateIsNotNull(Res),
+                               Builder.CreateNot(Carry));
+        LT = Carry;
+      } else {
+        GT = Builder.CreateXor(
+            Carry,
+            Builder.CreateICmpSGT(Res, Constant::getNullValue(Res->getType())));
+        LT = Builder.CreateXor(
+            Carry,
+            Builder.CreateICmpSLT(Res, Constant::getNullValue(Res->getType())));
+      }
+      return Builder.CreateSub(Builder.CreateZExt(GT, I.getType()),
+                               Builder.CreateZExt(LT, I.getType()));
     }
     default:
       return nullptr;
@@ -783,8 +837,20 @@ public:
     bool Changed = false;
     std::unordered_set<Instruction *> Set;
     for (auto &BB : F)
-      for (auto &I : BB)
-        Set.insert(&I);
+      for (auto &I : BB) {
+        if (!I.getType()->isIntegerTy() && !isa<WithOverflowInst>(I))
+          continue;
+
+        bool Valid = true;
+        for (auto &Op : I.operands())
+          if (!Op->getType()->isIntegerTy()) {
+            Valid = false;
+            break;
+          }
+
+        if (Valid)
+          Set.insert(&I);
+      }
 
     for (auto &BB : F) {
       for (auto &I : BB) {
