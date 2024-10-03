@@ -27,7 +27,7 @@ jobs:
         wget -O- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
         sudo add-apt-repository "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy main"
         sudo apt-get update
-        sudo apt-get install z3 re2c ninja-build clang llvm-dev libgtest-dev clang-tools-20 libllvmlibc-20-dev libmlir-20-dev mlir-20-tools
+        sudo apt-get install z3 re2c ninja-build clang llvm-dev libgtest-dev libpolly-20-dev clang-tools-20 libllvmlibc-20-dev libmlir-20-dev mlir-20-tools
 
     - name: Checkout Alive2
       uses: actions/checkout@v4
