@@ -26,6 +26,9 @@ jobs:
       run: |
         wget -O- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
         sudo add-apt-repository "deb http://apt.llvm.org/noble/ llvm-toolchain-noble main"
+        # Workaround for issue https://github.com/llvm/llvm-project/issues/133861
+        sudo ln -s /usr/lib/llvm-21/lib /usr/lib/lib
+        sudo ln -s /usr/lib/llvm-21/include /usr/lib/include
         sudo apt-get update
         sudo apt-get install z3 re2c ninja-build clang-21 llvm-21-dev libgtest-dev
 
