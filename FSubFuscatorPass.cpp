@@ -303,7 +303,7 @@ class BitFuscatorImpl final : public InstVisitor<BitFuscatorImpl, Value *> {
     DTUpdates.push_back({DominatorTree::Insert, Block, ShiftHeader});
     // DividedByZero
     Builder.SetInsertPoint(DividedByZero);
-    Builder.CreateIntrinsic(Intrinsic::trap, {}, {});
+    Builder.CreateIntrinsic(Intrinsic::trap,{});
     Builder.CreateUnreachable();
     // ShiftHeader
     Builder.SetInsertPoint(ShiftHeader);
