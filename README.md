@@ -37,6 +37,8 @@ echo "bbde02bd001bb27c4175347851b8a953c918de88d8a59f5115f2ec687f2bdb3e a.out.tar
 
 Good luck and have fun :)
 
+Update(2025-12-23): Solved by [@caozhanhao](https://github.com/caozhanhao). Congratulations! [Write-up](https://github.com/dtcxzyw/fsubfuscator/issues/2)
+
 ## Building
 ### Prerequisites
 
