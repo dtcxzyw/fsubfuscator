@@ -37,6 +37,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         repository: AliveToolkit/alive2
+        ref: '20a8472b77ba8a1f0b172059d422a55cb4dff120'
         path: alive2
 
     - name: Compile Alive2
