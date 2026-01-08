@@ -15,7 +15,7 @@
 
 #include "FSubFuscatorPass.hpp"
 #include <llvm/Passes/PassBuilder.h>
-#include <llvm/Passes/PassPlugin.h>
+#include <llvm/Plugins/PassPlugin.h>
 
 PassPluginLibraryInfo getFSubFuscatorPluginInfo() {
   return {LLVM_PLUGIN_API_VERSION, "FSubFuscator", LLVM_VERSION_STRING,
