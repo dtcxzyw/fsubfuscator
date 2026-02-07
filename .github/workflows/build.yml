@@ -27,11 +27,11 @@ jobs:
         wget -O- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
         sudo add-apt-repository "deb http://apt.llvm.org/noble/ llvm-toolchain-noble main"
         # Workaround for issue https://github.com/llvm/llvm-project/issues/133861
-        sudo ln -s /usr/lib/llvm-22/lib /usr/lib/lib
-        sudo ln -s /usr/lib/llvm-22/include /usr/lib/include
-        sudo ln -s /usr/lib/llvm-22/bin /usr/lib/bin
+        sudo ln -s /usr/lib/llvm-23/lib /usr/lib/lib
+        sudo ln -s /usr/lib/llvm-23/include /usr/lib/include
+        sudo ln -s /usr/lib/llvm-23/bin /usr/lib/bin
         sudo apt-get update
-        sudo apt-get install z3 re2c ninja-build clang-22 llvm-22-dev libgtest-dev
+        sudo apt-get install z3 re2c ninja-build clang-23 llvm-23-dev libgtest-dev
 
     - name: Checkout Alive2
       uses: actions/checkout@v4
